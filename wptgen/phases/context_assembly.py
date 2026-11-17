@@ -30,8 +30,50 @@ from wptgen.context import (
     gather_local_test_context,
     validate_wpt_paths,
 )
-from wptgen.models import WorkflowContext, WPTContext
+from wptgen.models import WorkflowContext, WorkflowError, WPTContext
 from wptgen.ui import UIProvider
+from wptgen.web_features_manifest import (
+    ResolvedManifest,
+    WebFeaturesManifestError,
+    resolve_manifest,
+)
+
+# Above this many mapped tests, audit prompts get very large.
+LARGE_FEATURE_TEST_COUNT = 100
+
+
+async def resolve_web_features_manifest(
+    config: Config, ui: UIProvider
+) -> ResolvedManifest:
+    """Resolves the web-features manifest for the configured WPT checkout.
+
+    Raises:
+        WorkflowError: If the manifest can't be downloaded or built.
+    """
+    assert config.wpt_path, "wpt_path is required to resolve the manifest"
+    assert config.cache_path, "cache_path is required to resolve the manifest"
+    try:
+        resolved = await asyncio.to_thread(
+            resolve_manifest,
+            config.wpt_path,
+            config.cache_path,
+            rebuild=config.rebuild_web_features_manifest,
+            notify=ui.print,
+        )
+    except WebFeaturesManifestError as e:
+        ui.error(f"Could not get WPT's web-features manifest: {e}")
+        raise WorkflowError(str(e)) from e
+
+    ui.info(
+        f"WPT checkout: {resolved.checkout.describe()}. Web-features "
+        f"manifest {resolved.origin} {resolved.created_at}."
+    )
+    if resolved.checkout.dirty:
+        ui.warning(
+            "The WPT checkout has uncommitted changes. The web-features "
+            "manifest for this run includes them."
+        )
+    return resolved
 
 
 async def run_context_assembly(
@@ -52,6 +94,11 @@ async def run_context_assembly(
       A WorkflowContext object containing all gathered data, or None on failure.
     """
     ui.on_phase_start(1, "Context Assembly")
+
+    # Resolve first, so a broken WPT setup fails before any other work.
+    manifest: ResolvedManifest | None = None
+    if config.wpt_path:
+        manifest = await resolve_web_features_manifest(config, ui)
 
     if config.chromestatus:
         metadata = await asyncio.to_thread(
@@ -150,7 +197,21 @@ async def run_context_assembly(
             "Scanning local WPT repository for existing tests and "
             "dependencies..."
         )
-        test_paths = find_feature_tests(config.wpt_path, feature_id)
+        assert manifest is not None
+        test_paths = find_feature_tests(
+            config.wpt_path, feature_id, manifest.path
+        )
+        if len(test_paths) > LARGE_FEATURE_TEST_COUNT:
+            ui.warning(
+                f"WPT maps {len(test_paths)} tests to '{feature_id}'. All of "
+                "them will be loaded into the audit, which may make its "
+                "prompts very large."
+            )
+        elif test_paths:
+            ui.print(
+                f"Found {len(test_paths)} test(s) mapped to '{feature_id}' "
+                "in WPT's web-features manifest."
+            )
 
         # If ChromeStatus is enabled, extract and validate tests from wpt_descr
         if config.chromestatus and metadata.wpt_descr:
@@ -192,7 +253,16 @@ async def run_context_assembly(
         raise ValueError("WPT path must be configured for CLI usage.")
 
     if not test_paths and config.wpt_path:
-        ui.warning("No existing Web Platform Tests were successfully loaded.")
+        ui.warning(
+            "No existing Web Platform Tests were loaded: WPT's web-features "
+            f"manifest maps no tests to '{feature_id}'"
+            + (
+                " and ChromeStatus listed none that exist locally"
+                if config.chromestatus
+                else ""
+            )
+            + ". The audit will treat every requirement as uncovered."
+        )
 
     mdn_contents: list[str] | None = None
     if config.include_mdn_docs and not config.chromestatus:
@@ -245,4 +315,5 @@ async def run_context_assembly(
         mdn_contents=mdn_contents,
         wpt_context=wpt_context,
         wpt_urls=extracted_wpt_urls,
+        web_features_manifest=manifest,
     )

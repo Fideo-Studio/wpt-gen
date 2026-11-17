@@ -110,6 +110,8 @@ class Config:
     include_thoughts: bool = False
     tentative: bool = False
     save_traces: bool = False
+    # Ignore the cached web-features manifest.
+    rebuild_web_features_manifest: bool = False
     resume_from: WorkflowPhase | None = None
     state_dir: str | None = None
     max_parallel_requests: int = 10
@@ -270,6 +272,7 @@ def load_config(
     run_on_browser_override: BrowserType | None = None,
     run_on_channel_override: BrowserChannel | None = None,
     temperature_override: float | None = None,
+    rebuild_manifest_override: bool = False,
 ) -> Config:
     """
     Loads configuration from YAML and environment variables.
@@ -490,6 +493,7 @@ def load_config(
         include_thoughts=include_thoughts,
         tentative=tentative,
         save_traces=save_traces,
+        rebuild_web_features_manifest=rebuild_manifest_override,
         resume_from=resume_from,
         state_dir=state_dir,
         audit_partition_size=audit_partition_size,

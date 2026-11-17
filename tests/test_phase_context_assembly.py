@@ -14,14 +14,46 @@
 
 """Tests for the context assembly phase."""
 
+import dataclasses
 from unittest.mock import MagicMock
 
 import pytest
 from pytest_mock import MockerFixture
 
 from wptgen.config import Config
-from wptgen.models import FeatureMetadata, WPTContext
-from wptgen.phases.context_assembly import run_context_assembly
+from wptgen.models import FeatureMetadata, WorkflowError, WPTContext
+from wptgen.phases.context_assembly import (
+    LARGE_FEATURE_TEST_COUNT,
+    run_context_assembly,
+)
+from wptgen.web_features_manifest import (
+    ResolvedManifest,
+    WebFeaturesManifestError,
+    WPTCheckout,
+)
+
+FAKE_MANIFEST = ResolvedManifest(
+    path="/cache/web-features-manifest/abc.json",
+    origin="built",
+    created_at="2026-11-16T00:00:00+00:00",
+    checkout=WPTCheckout(
+        root="/wpt",
+        head="abc",
+        upstream_tag="merge_pr_1",
+        upstream_commit="abc",
+        commits_ahead=0,
+        dirty=False,
+    ),
+)
+
+
+@pytest.fixture(autouse=True)
+def mock_resolve_manifest(mocker: MockerFixture) -> MagicMock:
+    """Stand in for WPT's manifest, which needs a real git checkout."""
+    return mocker.patch(
+        "wptgen.phases.context_assembly.resolve_manifest",
+        return_value=FAKE_MANIFEST,
+    )
 
 
 @pytest.mark.asyncio
@@ -222,7 +254,9 @@ async def test_run_context_assembly_unregistered_with_params(
         "Feature unregistered not found in the web-features repository."
     )
     mock_ui.warning.assert_any_call(
-        "No existing Web Platform Tests were successfully loaded."
+        "No existing Web Platform Tests were loaded: WPT's web-features "
+        "manifest maps no tests to 'unregistered'. The audit will treat every "
+        "requirement as uncovered."
     )
 
 
@@ -355,8 +389,10 @@ async def test_run_context_assembly_chromestatus_too_many_tests(
         "Max allowed is 50."
     )
     # Should also have warned that no tests were loaded
-    mock_ui.warning.assert_any_call(
-        "No existing Web Platform Tests were successfully loaded."
+    assert any(
+        "maps no tests to" in call.args[0]
+        and "ChromeStatus listed none that exist locally" in call.args[0]
+        for call in mock_ui.warning.call_args_list
     )
 
 
@@ -518,4 +554,146 @@ async def test_run_context_assembly_library_mode_remote_fetching(
             "css/css-flexbox/flex-minimum-height-flex-items-005.xht",
             "css/css-grid/grid-model",
         ]
+    )
+    assert context.web_features_manifest is None
+
+
+def _patch_registered_feature(mocker: MockerFixture) -> None:
+    mocker.patch(
+        "wptgen.phases.context_assembly.fetch_feature_yaml",
+        return_value={"name": "feat"},
+    )
+    mocker.patch(
+        "wptgen.phases.context_assembly.extract_feature_metadata",
+        return_value=FeatureMetadata("Feat", "Desc", ["http://spec"]),
+    )
+    mocker.patch(
+        "wptgen.phases.context_assembly.fetch_and_extract_text",
+        return_value="Spec Content",
+    )
+    mocker.patch(
+        "wptgen.phases.context_assembly.gather_local_test_context",
+        return_value=WPTContext(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_context_assembly_uses_resolved_manifest(
+    mock_config: Config,
+    mock_ui: MagicMock,
+    mocker: MockerFixture,
+    mock_resolve_manifest: MagicMock,
+) -> None:
+    """The manifest is resolved once and used for discovery and the context."""
+    _patch_registered_feature(mocker)
+    mock_find = mocker.patch(
+        "wptgen.phases.context_assembly.find_feature_tests",
+        return_value=["/wpt/a.html", "/wpt/b.html"],
+    )
+
+    context = await run_context_assembly("feat-id", mock_config, mock_ui)
+
+    assert context is not None
+    mock_resolve_manifest.assert_called_once()
+    assert mock_resolve_manifest.call_args.args == (
+        mock_config.wpt_path,
+        mock_config.cache_path,
+    )
+    assert mock_resolve_manifest.call_args.kwargs["rebuild"] is False
+    mock_find.assert_called_once_with(
+        mock_config.wpt_path, "feat-id", FAKE_MANIFEST.path
+    )
+    assert context.web_features_manifest == FAKE_MANIFEST
+    mock_ui.info.assert_any_call(
+        f"WPT checkout: {FAKE_MANIFEST.checkout.describe()}. Web-features "
+        f"manifest built {FAKE_MANIFEST.created_at}."
+    )
+    mock_ui.print.assert_any_call(
+        "Found 2 test(s) mapped to 'feat-id' in WPT's web-features manifest."
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_context_assembly_rebuild_flag(
+    mock_config: Config,
+    mock_ui: MagicMock,
+    mocker: MockerFixture,
+    mock_resolve_manifest: MagicMock,
+) -> None:
+    _patch_registered_feature(mocker)
+    mocker.patch(
+        "wptgen.phases.context_assembly.find_feature_tests", return_value=[]
+    )
+    mock_config.rebuild_web_features_manifest = True
+
+    await run_context_assembly("feat-id", mock_config, mock_ui)
+
+    assert mock_resolve_manifest.call_args.kwargs["rebuild"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_context_assembly_manifest_failure_stops_run(
+    mock_config: Config,
+    mock_ui: MagicMock,
+    mocker: MockerFixture,
+    mock_resolve_manifest: MagicMock,
+) -> None:
+    """A manifest that can't be built stops the run before any other work."""
+    mock_resolve_manifest.side_effect = WebFeaturesManifestError("wpt broke")
+    mock_fetch_yaml = mocker.patch(
+        "wptgen.phases.context_assembly.fetch_feature_yaml"
+    )
+
+    with pytest.raises(WorkflowError, match="wpt broke"):
+        await run_context_assembly("feat-id", mock_config, mock_ui)
+
+    mock_ui.error.assert_called_once_with(
+        "Could not get WPT's web-features manifest: wpt broke"
+    )
+    mock_fetch_yaml.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_context_assembly_warns_on_dirty_checkout(
+    mock_config: Config,
+    mock_ui: MagicMock,
+    mocker: MockerFixture,
+    mock_resolve_manifest: MagicMock,
+) -> None:
+    _patch_registered_feature(mocker)
+    mocker.patch(
+        "wptgen.phases.context_assembly.find_feature_tests",
+        return_value=["/wpt/a.html"],
+    )
+    mock_resolve_manifest.return_value = dataclasses.replace(
+        FAKE_MANIFEST,
+        checkout=dataclasses.replace(
+            FAKE_MANIFEST.checkout, dirty=True, dirty_fingerprint="f" * 64
+        ),
+    )
+
+    await run_context_assembly("feat-id", mock_config, mock_ui)
+
+    mock_ui.warning.assert_any_call(
+        "The WPT checkout has uncommitted changes. The web-features "
+        "manifest for this run includes them."
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_context_assembly_warns_on_large_features(
+    mock_config: Config, mock_ui: MagicMock, mocker: MockerFixture
+) -> None:
+    _patch_registered_feature(mocker)
+    count = LARGE_FEATURE_TEST_COUNT + 1
+    mocker.patch(
+        "wptgen.phases.context_assembly.find_feature_tests",
+        return_value=[f"/wpt/{i}.html" for i in range(count)],
+    )
+
+    await run_context_assembly("grid", mock_config, mock_ui)
+
+    mock_ui.warning.assert_any_call(
+        f"WPT maps {count} tests to 'grid'. All of them will be loaded into "
+        "the audit, which may make its prompts very large."
     )

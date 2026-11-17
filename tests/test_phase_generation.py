@@ -27,6 +27,7 @@ from wptgen.phases.generation import (
     run_single_test_generation,
     run_test_generation,
 )
+from wptgen.web_features_manifest import ResolvedManifest, WPTCheckout
 
 pytest.importorskip("google.adk")
 
@@ -166,6 +167,11 @@ async def test_generate_adk_loop(
     ]
 
     jinja_env = MagicMock()
+    mock_resolve = mocker.patch(
+        "wptgen.phases.generation.resolve_web_features_manifest",
+        new_callable=AsyncMock,
+        return_value=_manifest(Path("/cache/abc.json")),
+    )
 
     results = await _generate_adk_loop(
         [suggestion_xml], context, mock_config, mock_ui, jinja_env
@@ -174,6 +180,102 @@ async def test_generate_adk_loop(
     assert mock_adk.called
     assert len(results) == 1
     assert results[0][1] == "content"
+    # No manifest yet, so one is resolved and stored on the context.
+    mock_resolve.assert_awaited_once()
+    assert context.web_features_manifest == _manifest(Path("/cache/abc.json"))
+
+
+def _manifest(path: Path) -> ResolvedManifest:
+    return ResolvedManifest(
+        path=str(path),
+        origin="built",
+        created_at="2026-11-16T00:00:00+00:00",
+        checkout=WPTCheckout(
+            root="/wpt",
+            head="abc",
+            upstream_tag=None,
+            upstream_commit=None,
+            commits_ahead=None,
+            dirty=False,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_adk_loop_reuses_run_manifest(
+    mock_config: Config,
+    mock_ui: MagicMock,
+    mocker: MockerFixture,
+    tmp_path: Path,
+) -> None:
+    """The manifest resolved at the start of the run is never re-resolved."""
+    manifest_file = tmp_path / "abc.json"
+    manifest_file.write_text("{}")
+    context = WorkflowContext(
+        feature_id="feat",
+        metadata=FeatureMetadata("Feat", "D", ["url"]),
+        web_features_manifest=_manifest(manifest_file),
+    )
+    mocker.patch(
+        "wptgen.agents.adk_test_generator.generate_test_with_adk",
+        new_callable=AsyncMock,
+        create=True,
+        return_value=[],
+    )
+    mock_resolve = mocker.patch(
+        "wptgen.phases.generation.resolve_web_features_manifest",
+        new_callable=AsyncMock,
+    )
+
+    await _generate_adk_loop(
+        ["<test_suggestion><description>D</description></test_suggestion>"],
+        context,
+        mock_config,
+        mock_ui,
+        MagicMock(),
+    )
+
+    mock_resolve.assert_not_awaited()
+    assert context.web_features_manifest == _manifest(manifest_file)
+
+
+@pytest.mark.asyncio
+async def test_generate_adk_loop_re_resolves_missing_manifest(
+    mock_config: Config,
+    mock_ui: MagicMock,
+    mocker: MockerFixture,
+    tmp_path: Path,
+) -> None:
+    """A recorded manifest that was cleared from the cache is resolved again."""
+    context = WorkflowContext(
+        feature_id="feat",
+        metadata=FeatureMetadata("Feat", "D", ["url"]),
+        web_features_manifest=_manifest(tmp_path / "gone.json"),
+    )
+    mocker.patch(
+        "wptgen.agents.adk_test_generator.generate_test_with_adk",
+        new_callable=AsyncMock,
+        create=True,
+        return_value=[],
+    )
+    fresh = _manifest(tmp_path / "fresh.json")
+    mock_resolve = mocker.patch(
+        "wptgen.phases.generation.resolve_web_features_manifest",
+        new_callable=AsyncMock,
+        return_value=fresh,
+    )
+
+    await _generate_adk_loop(
+        ["<test_suggestion><description>D</description></test_suggestion>"],
+        context,
+        mock_config,
+        mock_ui,
+        MagicMock(),
+    )
+
+    mock_resolve.assert_awaited_once()
+    assert context.web_features_manifest == fresh
+    assert "no longer cached" in mock_ui.warning.call_args.args[0]
 
 
 @pytest.mark.asyncio

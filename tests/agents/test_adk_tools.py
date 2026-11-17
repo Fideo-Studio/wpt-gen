@@ -31,6 +31,7 @@ from wptgen.agents.tools import (
 )
 from wptgen.config import Config
 from wptgen.ui import UIProvider
+from wptgen.web_features_manifest import WebFeaturesManifestError
 
 
 def _create_mock_config(
@@ -423,22 +424,29 @@ def test_agent_tools_run_wpt_test(tmp_path: Path, mocker: Any) -> None:
 def test_agent_tools_search_feature_tests(tmp_path: Path, mocker: Any) -> None:
     wpt_root = tmp_path / "wpt"
     wpt_root.mkdir()
+    manifest_path = tmp_path / "manifest.json"
 
     tools = create_agent_tools(
-        wpt_root, MagicMock(spec=UIProvider), "chrome", "canary"
+        wpt_root,
+        MagicMock(spec=UIProvider),
+        "chrome",
+        "canary",
+        web_features_manifest_path=manifest_path,
     )
     tool = next(t for t in tools if t.name == "search_feature_tests")
 
-    mocker.patch(
+    mock_find = mocker.patch(
         "wptgen.agents.tools.find_feature_tests",
         return_value=[str(wpt_root / "a.html")],
     )
     result = tool.func("popover")
-    assert result["status"] == "success"
+    assert result == {"status": "success", "test_files": ["a.html"]}
+    mock_find.assert_called_once_with(str(wpt_root), "popover", manifest_path)
 
     mocker.patch("wptgen.agents.tools.find_feature_tests", return_value=[])
     result = tool.func("popover_missing")
     assert result["status"] == "success"
+    assert result["test_files"] == []
 
     mocker.patch(
         "wptgen.agents.tools.find_feature_tests",
@@ -446,6 +454,31 @@ def test_agent_tools_search_feature_tests(tmp_path: Path, mocker: Any) -> None:
     )
     result = tool.func("popover")
     assert result["status"] == "error"
+
+    mocker.patch(
+        "wptgen.agents.tools.find_feature_tests",
+        side_effect=WebFeaturesManifestError("bad manifest"),
+    )
+    result = tool.func("popover")
+    assert result == {"status": "error", "error": "bad manifest"}
+
+
+def test_agent_tools_search_feature_tests_without_manifest(
+    tmp_path: Path, mocker: Any
+) -> None:
+    wpt_root = tmp_path / "wpt"
+    wpt_root.mkdir()
+    tools = create_agent_tools(
+        wpt_root, MagicMock(spec=UIProvider), "chrome", "canary"
+    )
+    tool = next(t for t in tools if t.name == "search_feature_tests")
+    mock_find = mocker.patch("wptgen.agents.tools.find_feature_tests")
+
+    result = tool.func("popover")
+
+    assert result["status"] == "error"
+    assert "No web-features manifest" in result["error"]
+    mock_find.assert_not_called()
 
 
 def test_file_tools_search_file_contents(tmp_path: Path) -> None:

@@ -559,6 +559,16 @@ def generate(
             ),
         ),
     ] = False,
+    rebuild_manifest: Annotated[
+        bool,
+        typer.Option(
+            "--rebuild-manifest",
+            help=(
+                "Ignore the cached WPT web-features manifest for the "
+                "checkout's current state and download or build it again."
+            ),
+        ),
+    ] = False,
     audit_partition_size: Annotated[
         int | None,
         typer.Option(
@@ -666,6 +676,7 @@ def generate(
             use_reasoning_override=use_reasoning,
             tentative_override=tentative,
             save_traces_override=save_traces,
+            rebuild_manifest_override=rebuild_manifest,
             audit_partition_size_override=audit_partition_size,
             max_parallel_requests_override=max_parallel_requests,
             temperature_override=temperature,
@@ -1118,6 +1129,16 @@ def chromestatus_command(
             ),
         ),
     ] = False,
+    rebuild_manifest: Annotated[
+        bool,
+        typer.Option(
+            "--rebuild-manifest",
+            help=(
+                "Ignore the cached WPT web-features manifest for the "
+                "checkout's current state and download or build it again."
+            ),
+        ),
+    ] = False,
     suggestions_only: Annotated[
         bool,
         typer.Option(
@@ -1193,6 +1214,7 @@ def chromestatus_command(
             include_thoughts_override=include_thoughts,
             tentative_override=False,
             save_traces_override=save_traces,
+            rebuild_manifest_override=rebuild_manifest,
             max_parallel_requests_override=None,
             run_on_browser_override=None,
             run_on_channel_override=None,
@@ -1775,6 +1797,16 @@ def audit(
             ),
         ),
     ] = False,
+    rebuild_manifest: Annotated[
+        bool,
+        typer.Option(
+            "--rebuild-manifest",
+            help=(
+                "Ignore the cached WPT web-features manifest for the "
+                "checkout's current state and download or build it again."
+            ),
+        ),
+    ] = False,
     audit_partition_size: Annotated[
         int | None,
         typer.Option(
@@ -1884,6 +1916,7 @@ def audit(
             use_reasoning_override=use_reasoning,
             tentative_override=False,
             save_traces_override=save_traces,
+            rebuild_manifest_override=rebuild_manifest,
             audit_partition_size_override=audit_partition_size,
             max_parallel_requests_override=max_parallel_requests,
             temperature_override=temperature,

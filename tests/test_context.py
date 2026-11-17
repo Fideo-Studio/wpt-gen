@@ -14,6 +14,7 @@
 
 """Tests for context.py."""
 
+import json
 import urllib.error
 from email.message import Message
 from pathlib import Path
@@ -24,7 +25,6 @@ from pytest_mock import MockerFixture
 
 from wptgen.context import (
     FeatureMetadata,
-    _resolve_patterns,
     _slice_html_by_anchor,
     extract_dependencies,
     extract_feature_metadata,
@@ -43,6 +43,7 @@ from wptgen.context import (
     validate_ip_against_ssrf,
     validate_wpt_paths,
 )
+from wptgen.web_features_manifest import WebFeaturesManifestError
 
 
 def test_is_wpt_test_file() -> None:
@@ -521,123 +522,87 @@ def test_fetch_and_extract_text_preserves_internal_links(
     assert "https://external.com" not in result
 
 
-def test_resolve_patterns_basic_and_recursive(tmp_path: Path) -> None:
-    """Test that _resolve_patterns correctly handles standard and recursive
-    globs.
-    """
-    # Create a mock directory structure
-    (tmp_path / "test1.html").touch()
-    (tmp_path / "test2.txt").touch()
-
-    sub_dir = tmp_path / "subfolder"
-    sub_dir.mkdir()
-    (sub_dir / "test3.html").touch()
-
-    # Also create a WEB_FEATURES.yml, which should be explicitly ignored
-    (tmp_path / "WEB_FEATURES.yml").touch()
-
-    # Look for all HTML files, including those in subdirectories
-    patterns = ["**/*.html"]
-    results = _resolve_patterns(tmp_path, patterns)
-
-    assert len(results) == 2
-    assert str(tmp_path / "test1.html") in results
-    assert str(sub_dir / "test3.html") in results
-    assert str(tmp_path / "test2.txt") not in results
-    assert str(tmp_path / "WEB_FEATURES.yml") not in results
+def _write_manifest(path: Path, data: dict[str, list[str]]) -> Path:
+    path.write_text(json.dumps({"version": 1, "data": data}), encoding="utf-8")
+    return path
 
 
-def test_resolve_patterns_negative_exclusion(tmp_path: Path) -> None:
-    """Test that negative patterns (!pattern) successfully remove files from
-    the set.
-    """
-    (tmp_path / "include_me.html").touch()
-    (tmp_path / "exclude_me.html").touch()
+def test_find_feature_tests_reads_manifest(tmp_path: Path) -> None:
+    """Tests come from WPT's manifest, mapped back to source files."""
+    wpt = tmp_path / "wpt"
+    (wpt / "css" / "css-grid").mkdir(parents=True)
+    (wpt / "css" / "css-grid" / "grid-001.html").touch()
+    (wpt / "css" / "css-grid" / "api.any.js").touch()
+    manifest = _write_manifest(
+        tmp_path / "manifest.json",
+        {
+            "grid": [
+                "/css/css-grid/grid-001.html",
+                "/css/css-grid/api.any.html",
+                "/css/css-grid/api.any.worker.html",
+            ],
+            "other": ["/css/css-grid/other.html"],
+        },
+    )
 
-    patterns = ["*.html", "!exclude_me.html"]
+    results = find_feature_tests(str(wpt), "grid", manifest)
 
-    results = _resolve_patterns(tmp_path, patterns)
-
-    assert len(results) == 1
-    assert str(tmp_path / "include_me.html") in results
-    assert str(tmp_path / "exclude_me.html") not in results
-
-
-def test_find_feature_tests_happy_path(tmp_path: Path) -> None:
-    """Test the full end-to-end scan for a specific feature."""
-    # Build the repository structure
-    feat_dir = tmp_path / "css" / "css-grid"
-    feat_dir.mkdir(parents=True)
-
-    # Create the YAML metadata file
-    yaml_content = """
-features:
-  - name: grid
-    files:
-      - "**/*.html"
-      - "!**/skip.html"
-  - name: other-feature
-    files:
-      - "other.html"
-  """
-    (feat_dir / "WEB_FEATURES.yml").write_text(yaml_content, encoding="utf-8")
-
-    # Create the test files
-    (feat_dir / "grid_test.html").touch()
-    (feat_dir / "skip.html").touch()
-
-    results = find_feature_tests(str(tmp_path), "grid")
-
-    assert len(results) == 1
-    assert results[0] == str(feat_dir / "grid_test.html")
+    assert results == [
+        str((wpt / "css" / "css-grid" / "api.any.js").resolve()),
+        str((wpt / "css" / "css-grid" / "grid-001.html").resolve()),
+    ]
 
 
-def test_find_feature_tests_missing_directory() -> None:
+def test_find_feature_tests_feature_not_in_manifest(tmp_path: Path) -> None:
+    """A feature with no mapped tests returns an empty list."""
+    wpt = tmp_path / "wpt"
+    wpt.mkdir()
+    manifest = _write_manifest(tmp_path / "manifest.json", {"grid": []})
+
+    assert not find_feature_tests(str(wpt), "non-existent-feature", manifest)
+
+
+def test_find_feature_tests_warns_on_unmapped_urls(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """URLs without a source file are reported, not silently dropped."""
+    wpt = tmp_path / "wpt"
+    wpt.mkdir()
+    (wpt / "present.html").touch()
+    manifest = _write_manifest(
+        tmp_path / "manifest.json",
+        {"grid": ["/present.html", "/missing.html"]},
+    )
+
+    with caplog.at_level("WARNING"):
+        results = find_feature_tests(str(wpt), "grid", manifest)
+
+    assert results == [str((wpt / "present.html").resolve())]
+    assert "1 test URL(s) mapped to 'grid'" in caplog.text
+    assert "/missing.html" in caplog.text
+
+
+def test_find_feature_tests_missing_directory(tmp_path: Path) -> None:
     """Test that an invalid repository path raises a ValueError."""
     with pytest.raises(
         ValueError, match="The directory provided does not exist"
     ):
-        find_feature_tests("/path/that/absolutely/does/not/exist", "grid")
+        find_feature_tests(
+            "/path/that/absolutely/does/not/exist",
+            "grid",
+            tmp_path / "manifest.json",
+        )
 
 
-def test_find_feature_tests_malformed_yaml(tmp_path: Path) -> None:
-    """Test that malformed YAML files are gracefully skipped without crashing
-    the loop.
-    """
-    # Create a broken YAML file
-    feat_dir = tmp_path / "broken-feature"
-    feat_dir.mkdir()
-    (feat_dir / "WEB_FEATURES.yml").write_text(
-        "features:\n - name: oops\n  bad_indent: true", encoding="utf-8"
-    )
+def test_find_feature_tests_invalid_manifest(tmp_path: Path) -> None:
+    """A bad manifest raises instead of looking like zero tests."""
+    wpt = tmp_path / "wpt"
+    wpt.mkdir()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"version": 2, "data": {}}', encoding="utf-8")
 
-    # Create a valid one to ensure the loop continues after the error
-    valid_dir = tmp_path / "valid-feature"
-    valid_dir.mkdir()
-    (valid_dir / "WEB_FEATURES.yml").write_text(
-        "features:\n  - name: works\n    files:\n      - 'test.html'",
-        encoding="utf-8",
-    )
-    (valid_dir / "test.html").touch()
-
-    results = find_feature_tests(str(tmp_path), "works")
-    # It should have skipped the broken directory and found the valid one
-    assert len(results) == 1
-    assert results[0] == str(valid_dir / "test.html")
-
-
-def test_find_feature_tests_feature_not_found(tmp_path: Path) -> None:
-    """Test that if a feature ID is not in any YAML, it returns an empty
-    list.
-    """
-    (tmp_path / "WEB_FEATURES.yml").write_text(
-        "features:\n  - name: grid\n    files:\n      - '*.html'",
-        encoding="utf-8",
-    )
-
-    results = find_feature_tests(str(tmp_path), "non-existent-feature")
-
-    assert not results
+    with pytest.raises(WebFeaturesManifestError, match="version 2"):
+        find_feature_tests(str(wpt), "grid", manifest)
 
 
 def test_extract_dependencies() -> None:
@@ -746,30 +711,6 @@ def test_fetch_feature_yaml_not_a_dict(mocker: MockerFixture) -> None:
     mock_urlopen.return_value.__enter__.return_value = mock_response
 
     assert fetch_feature_yaml("popover") is None
-
-
-def test_find_feature_tests_yaml_missing_features(tmp_path: Path) -> None:
-    """Test that YAML files without a 'features' key are skipped."""
-    feat_dir = tmp_path / "no-features"
-    feat_dir.mkdir()
-    (feat_dir / "WEB_FEATURES.yml").write_text(
-        "something: else", encoding="utf-8"
-    )
-
-    assert not find_feature_tests(str(tmp_path), "grid")
-
-
-def test_find_feature_tests_exception(
-    tmp_path: Path, mocker: MockerFixture
-) -> None:
-    """Test that exceptions during YAML processing are caught."""
-    feat_dir = tmp_path / "exception"
-    feat_dir.mkdir()
-    (feat_dir / "WEB_FEATURES.yml").touch()
-
-    # Mock open to raise an exception for this specific file
-    mocker.patch("builtins.open", side_effect=Exception("IO Error"))
-    assert not find_feature_tests(str(tmp_path), "grid")
 
 
 def test_resolve_dependency_path_invalid(tmp_path: Path) -> None:

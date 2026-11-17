@@ -27,6 +27,7 @@ from typing import Any
 from google.adk.tools.function_tool import FunctionTool
 
 from wptgen.context import fetch_and_extract_text, find_feature_tests
+from wptgen.web_features_manifest import WebFeaturesManifestError
 from wptgen.lint_ext import check_file as run_lint_ext_checks
 from wptgen.ui import UIProvider
 
@@ -169,6 +170,7 @@ def create_agent_tools(
     channel: str,
     include_run_tool: bool = True,
     omit_search_feature_tests: bool = False,
+    web_features_manifest_path: str | Path | None = None,
 ) -> list[FunctionTool]:
     """Creates a suite of strictly validated tools for the ADK agent.
 
@@ -182,6 +184,8 @@ def create_agent_tools(
         browser: The browser to use for testing.
         channel: The browser channel.
         include_run_tool: Whether to include the run_wpt_test tool.
+        omit_search_feature_tests: Whether to leave out search_feature_tests.
+        web_features_manifest_path: The manifest search_feature_tests reads.
 
     Returns:
         A list of ADK `FunctionTool` objects.
@@ -641,8 +645,15 @@ def create_agent_tools(
         Returns:
             A dictionary with 'status' and matching 'test_files'.
         """
+        if web_features_manifest_path is None:
+            return {
+                "status": "error",
+                "error": "No web-features manifest is available for this run.",
+            }
         try:
-            matches = find_feature_tests(str(wpt_path), feature_id)
+            matches = find_feature_tests(
+                str(wpt_path), feature_id, web_features_manifest_path
+            )
             if matches:
                 # Clean up paths to be relative for the agent's consumption
                 rel_matches = [
@@ -655,7 +666,7 @@ def create_agent_tools(
                 "test_files": [],
                 "message": f"No existing tests found for {feature_id}",
             }
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, WebFeaturesManifestError) as e:
             return {"status": "error", "error": str(e)}
 
     def fetch_spec_content(url: str) -> dict[str, Any]:

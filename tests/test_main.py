@@ -101,6 +101,7 @@ def default_load_config_kwargs() -> (
         "use_reasoning_override": False,
         "tentative_override": False,
         "save_traces_override": False,
+        "rebuild_manifest_override": False,
         "audit_partition_size_override": None,
         "max_parallel_requests_override": None,
         "temperature_override": None,

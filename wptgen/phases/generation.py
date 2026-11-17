@@ -27,6 +27,7 @@ from wptgen.models import (
     WorkflowContext,
     WorkflowPhase,
 )
+from wptgen.phases.context_assembly import resolve_web_features_manifest
 from wptgen.ui import UIProvider
 from wptgen.utils import (
     extract_xml_tag,
@@ -208,6 +209,20 @@ async def _generate_adk_loop(
       A flat list of all generated test files.
     """
     from wptgen.agents.adk_test_generator import generate_test_with_adk
+
+    # Runs that skipped context assembly resolve the manifest here, before
+    # any agent writes to the checkout.
+    if context.feature_id and config.wpt_path:
+        manifest = context.web_features_manifest
+        if manifest is None or not Path(manifest.path).is_file():
+            if manifest is not None:
+                ui.warning(
+                    "The web-features manifest recorded for this run is no "
+                    "longer cached; resolving it again."
+                )
+            context.web_features_manifest = await resolve_web_features_manifest(
+                config, ui
+            )
 
     ui.report_generation_start(len(approved_suggestions_xml))
 

@@ -19,6 +19,8 @@ from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any
 
+from wptgen.web_features_manifest import ResolvedManifest
+
 
 class WorkflowError(Exception):
     """Raised when a phase of the workflow fails to complete."""
@@ -192,6 +194,8 @@ class WorkflowContext:
     generated_tests: list[tuple[Path, str, str]] | None = None
     wpt_urls: list[str] | None = None
     markdown_report: str | None = None
+    # Manifest and checkout state captured at the start of the run.
+    web_features_manifest: ResolvedManifest | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Converts the context to a dictionary."""
@@ -215,6 +219,11 @@ class WorkflowContext:
             ),
             "wpt_urls": self.wpt_urls,
             "markdown_report": self.markdown_report,
+            "web_features_manifest": (
+                self.web_features_manifest.to_dict()
+                if self.web_features_manifest
+                else None
+            ),
         }
         return data
 
@@ -259,4 +268,9 @@ class WorkflowContext:
             generated_tests=generated_tests,
             wpt_urls=data.get("wpt_urls"),
             markdown_report=data.get("markdown_report"),
+            web_features_manifest=(
+                ResolvedManifest.from_dict(data["web_features_manifest"])
+                if data.get("web_features_manifest")
+                else None
+            ),
         )

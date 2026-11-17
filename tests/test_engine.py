@@ -14,6 +14,7 @@
 
 """Tests for engine.py."""
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,6 +24,7 @@ from pytest_mock import MockerFixture
 from wptgen.config import Config
 from wptgen.engine import WPTGenEngine
 from wptgen.models import WorkflowContext, WorkflowError, WorkflowPhase
+from wptgen.web_features_manifest import ResolvedManifest, WPTCheckout
 
 
 @pytest.fixture
@@ -583,3 +585,64 @@ def test_engine_isolated_import() -> None:
         text=True,
     )
     assert result.returncode == 0, f"Import failed: {result.stderr}"
+
+
+@pytest.mark.asyncio
+async def test_run_async_workflow_records_wpt_checkout(
+    engine: WPTGenEngine, mocker: MockerFixture, tmp_path: Path
+) -> None:
+    """Context assembly's manifest and checkout state are saved for provenance."""
+    engine.config.state_dir = str(tmp_path / "state")
+    engine.config.suggestions_only = True
+    manifest = ResolvedManifest(
+        path="/cache/abc.json",
+        origin="downloaded",
+        created_at="2026-11-16T00:00:00+00:00",
+        checkout=WPTCheckout(
+            root="/wpt",
+            head="abc",
+            upstream_tag="merge_pr_1",
+            upstream_commit="abc",
+            commits_ahead=0,
+            dirty=False,
+        ),
+        source_url="https://example.test/manifest.json.gz",
+    )
+    context = WorkflowContext(
+        feature_id="feat-id", web_features_manifest=manifest
+    )
+    mocker.patch("wptgen.engine.run_context_assembly", return_value=context)
+    mocker.patch(
+        "wptgen.engine.run_requirements_extraction_categorized",
+        return_value="reqs",
+    )
+    mocker.patch("wptgen.engine.run_coverage_audit", return_value="audit")
+
+    await engine._run_async_workflow("feat-id")
+
+    saved = json.loads(
+        (tmp_path / "state" / "wpt_checkout.json").read_text(encoding="utf-8")
+    )
+    assert ResolvedManifest.from_dict(saved) == manifest
+
+
+@pytest.mark.asyncio
+async def test_run_async_workflow_without_manifest_writes_no_checkout(
+    engine: WPTGenEngine, mocker: MockerFixture, tmp_path: Path
+) -> None:
+    """Library mode has no local checkout, so there is nothing to record."""
+    engine.config.state_dir = str(tmp_path / "state")
+    engine.config.suggestions_only = True
+    mocker.patch(
+        "wptgen.engine.run_context_assembly",
+        return_value=WorkflowContext(feature_id="feat-id"),
+    )
+    mocker.patch(
+        "wptgen.engine.run_requirements_extraction_categorized",
+        return_value="reqs",
+    )
+    mocker.patch("wptgen.engine.run_coverage_audit", return_value="audit")
+
+    await engine._run_async_workflow("feat-id")
+
+    assert not (tmp_path / "state" / "wpt_checkout.json").exists()

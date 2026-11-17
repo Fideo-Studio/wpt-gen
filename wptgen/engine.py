@@ -185,16 +185,28 @@ class WPTGenEngine:
 
         return context
 
-    def _save_phase_artifacts(
-        self, context: WorkflowContext, phase: WorkflowPhase
-    ) -> None:
-        """Explicitly serializes structured output of major phases to disk."""
+    def _state_dir(self) -> Path:
         state_dir = (
             Path(self.config.state_dir)
             if self.config.state_dir
             else self.cache_dir
         )
         state_dir.mkdir(parents=True, exist_ok=True)
+        return state_dir
+
+    def _save_wpt_checkout(self, context: WorkflowContext) -> None:
+        """Records the WPT checkout and manifest the run used."""
+        if not context.web_features_manifest:
+            return
+        checkout_file = self._state_dir() / "wpt_checkout.json"
+        with open(checkout_file, "w", encoding="utf-8") as f:
+            json.dump(context.web_features_manifest.to_dict(), f, indent=2)
+
+    def _save_phase_artifacts(
+        self, context: WorkflowContext, phase: WorkflowPhase
+    ) -> None:
+        """Explicitly serializes structured output of major phases to disk."""
+        state_dir = self._state_dir()
 
         if (
             phase == WorkflowPhase.REQUIREMENTS_EXTRACTION
@@ -264,6 +276,7 @@ class WPTGenEngine:
                 raise WorkflowError("Phase 1: Context Assembly failed.")
 
             self._save_resume_state(context)
+            self._save_wpt_checkout(context)
 
         if not self.config.output_dir and not disable_directory_inference:
             from wptgen.utils import determine_output_directory

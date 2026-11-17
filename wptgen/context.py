@@ -33,6 +33,7 @@ from bs4 import BeautifulSoup, Tag
 
 from wptgen.models import DataSource, FeatureMetadata, WPTContext
 from wptgen.utils import MAX_RETRIES, retry
+from wptgen.web_features_manifest import feature_test_paths
 
 __all__ = ["DataSource", "FeatureMetadata", "WPTContext"]
 
@@ -732,77 +733,24 @@ def validate_wpt_paths(
     return sorted(valid_paths), invalid_paths
 
 
-def find_feature_tests(target_directory: str, feature_id: str) -> list[str]:
-    """Scans a directory for test files relevant to a specific feature ID."""
+def find_feature_tests(
+    target_directory: str, feature_id: str, manifest_path: str | Path
+) -> list[str]:
+    """Returns the test files mapped to a feature in WPT's manifest."""
     base_dir = Path(target_directory).resolve()
     if not base_dir.is_dir():
         raise ValueError(f"The directory provided does not exist: {base_dir}")
 
-    relevant_files: set[str] = set()
-    target_metadata_file = "WEB_FEATURES.yml"
-
-    # rglob recursively finds all WEB_FEATURES.yml files in the repository
-    for yaml_path in base_dir.rglob(target_metadata_file):
-        try:
-            with open(yaml_path, encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            if not data or "features" not in data:
-                continue
-
-            feature_config = next(
-                (f for f in data["features"] if f.get("name") == feature_id),
-                None,
-            )
-
-            if feature_config:
-                patterns = feature_config.get("files", [])
-                # Pass the directory containing the YAML file
-                matched_files = _resolve_patterns(yaml_path.parent, patterns)
-                relevant_files.update(matched_files)
-
-        except yaml.YAMLError:
-            continue
-        except Exception as e:
-            logger.warning(f"Error processing {yaml_path}: {e}")
-
-    # Convert back to a sorted list of absolute string paths
-    return sorted(relevant_files)
-
-
-def _resolve_patterns(directory: Path, patterns: list[str]) -> set[str]:
-    """Helper to match file patterns recursively against files in directory."""
-    all_files = [
-        p
-        for p in directory.rglob("*")
-        if p.is_file() and p.suffix.lower() not in (".yml", ".yaml")
-    ]
-
-    selected_files: set[Path] = set()
-
-    for pattern in patterns:
-        is_negative = pattern.startswith("!")
-        clean_pattern = pattern[1:] if is_negative else pattern
-
-        matches = set()
-        for f in all_files:
-            rel_path = f.relative_to(directory)
-
-            # 1. Standard strict match
-            is_match = rel_path.match(clean_pattern)
-
-            # If pattern is `**/*.html`, it misses root files like `test.html`.
-            # We strip `**/` and check if `test.html` matches `*.html`.
-            if not is_match and clean_pattern.startswith("**/"):
-                is_match = rel_path.match(clean_pattern[3:])
-            if is_match:
-                matches.add(f)
-
-        if is_negative:
-            selected_files.difference_update(matches)
-        else:
-            selected_files.update(matches)
-
-    return {str(f) for f in selected_files}
+    paths, unmapped = feature_test_paths(manifest_path, base_dir, feature_id)
+    if unmapped:
+        shown = ", ".join(unmapped[:5])
+        more = f" (and {len(unmapped) - 5} more)" if len(unmapped) > 5 else ""
+        logger.warning(
+            f"{len(unmapped)} test URL(s) mapped to '{feature_id}' in the "
+            f"web-features manifest have no source file in {base_dir}: "
+            f"{shown}{more}"
+        )
+    return paths
 
 
 def extract_dependencies(content: str) -> list[str]:
