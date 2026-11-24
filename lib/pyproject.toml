@@ -39,23 +39,23 @@ classifiers = [
 ]
 dependencies = [
     # Core LLM Integration (Excluding google-adk)
-    "google-genai>=1.62.0",
-    "openai>=2.20.0",
-    "anthropic>=0.84.0",
-    "tiktoken>=0.12.0",
+    "google-genai>=1.62.0,<3.0.0",
+    "openai>=2.20.0,<4.0.0",
+    "anthropic>=0.84.0,<3.0.0",
+    "tiktoken>=0.12.0,<1.0.0",
 
     # Context & Scraping
-    "beautifulsoup4>=4.12.0",
-    "lxml>=6.0.4",
-    "markdownify>=0.14.0",
+    "beautifulsoup4>=4.12.0,<5.0.0",
+    "lxml>=6.0.4,<7.0.0",
+    "markdownify>=0.14.0,<2.0.0",
 
     # Prompt Templating
-    "jinja2>=3.1.6",
+    "jinja2>=3.1.6,<4.0.0",
 
     # CLI Infrastructure
-    "typer>=0.23.0",
-    "rich>=15.0.0",
-    "pyyaml>=6.0.3",
+    "typer>=0.23.0,<1.0.0",
+    "rich>=15.0.0,<16.0.0",
+    "pyyaml>=6.0.3,<7.0.0",
 ]
 
 [tool.setuptools.packages.find]

@@ -40,25 +40,25 @@ classifiers = [
 dependencies = [
     # Core LLM Integration
     "google-adk>=2.7.0,<3.0.0",
-    "google-cloud-storage>=2.18.0",
-    "google-genai>=1.62.0",
-    "openai>=2.20.0",
-    "anthropic>=0.84.0",
-    "tiktoken>=0.12.0",
-    "litellm>=1.84.0",
+    "google-cloud-storage>=2.18.0,<4.0.0",
+    "google-genai>=1.62.0,<3.0.0",
+    "openai>=2.20.0,<4.0.0",
+    "anthropic>=0.84.0,<3.0.0",
+    "tiktoken>=0.12.0,<1.0.0",
+    "litellm>=1.84.0,<2.0.0",
 
     # Context & Scraping
-    "beautifulsoup4>=4.12.0",
-    "lxml>=6.0.4",
-    "markdownify>=0.14.0",
+    "beautifulsoup4>=4.12.0,<5.0.0",
+    "lxml>=6.0.4,<7.0.0",
+    "markdownify>=0.14.0,<2.0.0",
 
     # Prompt Templating
-    "jinja2>=3.1.6",
+    "jinja2>=3.1.6,<4.0.0",
 
     # CLI Infrastructure
-    "typer>=0.23.0",
-    "rich>=15.0.0",
-    "pyyaml>=6.0.3",
+    "typer>=0.23.0,<1.0.0",
+    "rich>=15.0.0,<16.0.0",
+    "pyyaml>=6.0.3,<7.0.0",
 ]
 
 [project.urls]
@@ -68,17 +68,17 @@ Issues = "https://github.com/GoogleChromeLabs/wpt-gen/issues"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.0.2",
-    "pytest-mock>=3.15.1",
-    "pytest-asyncio>=1.3.0",
-    "pytest-cov>=7.0.0",
-    "ruff>=0.15.0",
-    "mypy>=1.20.1",
-    "types-PyYAML>=6.0.12.20250915",
-    "build>=1.4.0",
-    "twine>=6.2.0",
-    "black>=24.1.0",
-    "pylint>=4.0.5",
+    "pytest>=9.0.2,<10.0.0",
+    "pytest-mock>=3.15.1,<4.0.0",
+    "pytest-asyncio>=1.3.0,<2.0.0",
+    "pytest-cov>=7.0.0,<8.0.0",
+    "ruff>=0.15.0,<1.0.0",
+    "mypy>=1.20.1,<3.0.0",
+    "types-PyYAML>=6.0.12.20250915,<7.0.0",
+    "build>=1.4.0,<2.0.0",
+    "twine>=6.2.0,<8.0.0",
+    "black>=24.1.0,<27.0.0",
+    "pylint>=4.0.5,<5.0.0",
 ]
 
 [project.scripts]
