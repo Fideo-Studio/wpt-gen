@@ -18,6 +18,7 @@ Extract the following elements from the `<test_suggestion>` XML snippet provided
 - `<feature_id>`: Used to find where the test should live.
 {% endif %}
 - `<description>`: The underlying requirement or specification behavior to test.
+- `<spec_quote>` (optional): The exact specification text the requirement comes from. Use it to check that your assertions match what the spec actually says.
 - `<spec_url>` (can be multiple): A link to the specification. You MUST include these exact URLs in the generated test (using `<link rel="help" href="...">` for HTML tests, or as a single-line comment for `.js` tests).
 
 ### 2. Locate the Test Directory

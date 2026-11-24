@@ -35,6 +35,7 @@ def test_coverage_audit_system_template_brief_rendering() -> None:
     )
     assert "<title>" not in rendered_brief
     assert "<description>" in rendered_brief
+    assert "<spec_quote>" in rendered_brief
     assert "<test_type>" not in rendered_brief
     assert "<pre_conditions>" not in rendered_brief
     assert "<steps>" not in rendered_brief
@@ -45,7 +46,25 @@ def test_coverage_audit_system_template_brief_rendering() -> None:
     rendered_full = template.render(brief_suggestions=False)
     assert "<title>" in rendered_full
     assert "<description>" in rendered_full
+    assert "<spec_quote>" in rendered_full
     assert "<test_type>" in rendered_full
     assert "<pre_conditions>" in rendered_full
     assert "<steps>" in rendered_full
     assert "<expected_result>" in rendered_full
+
+
+def test_requirements_extraction_system_templates_ask_for_spec_quote() -> None:
+    """Verifies that every requirements extraction prompt asks for a verbatim
+    spec quote on each requirement.
+    """
+    env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)))
+    for name in (
+        "requirements_extraction_system.jinja",
+        "requirements_extraction_categorized_system.jinja",
+        "requirements_extraction_iterative_system.jinja",
+    ):
+        rendered = env.get_template(name).render(
+            category_name="Existence", category_description="D"
+        )
+        assert "**Verbatim Spec Quote:**" in rendered, name
+        assert "<spec_quote>" in rendered, name

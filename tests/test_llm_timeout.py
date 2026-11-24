@@ -131,10 +131,11 @@ def test_openai_timeout_handling(
     mock_instance = mock_openai_class.return_value
 
     # Simulate an OpenAI timeout
-    # APITimeoutError requires a request object, but we can just mock the
-    # exception
+    # APITimeoutError requires a request object, but we can just mock it.
+    # openai 3.x types it as httpx2.Request and 2.x as httpx.Request, so a
+    # mock keeps this test working with both.
     mock_instance.chat.completions.create.side_effect = openai.APITimeoutError(
-        request=httpx.Request("POST", "https://api.openai.com")
+        request=mocker.MagicMock()
     )
 
     assert base_config.api_key is not None

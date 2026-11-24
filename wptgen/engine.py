@@ -35,6 +35,7 @@ from wptgen.phases.requirements_extraction import (
     run_requirements_extraction_iterative,
 )
 from wptgen.ui import UIProvider
+from wptgen.utils import extract_xml_tag
 
 __all__ = [
     "WPTGenEngine",
@@ -228,7 +229,12 @@ class WPTGenEngine:
         elif phase == WorkflowPhase.GENERATION and context.generated_tests:
             tests_json = state_dir / "generated_tests.json"
             tests_data = [
-                {"path": str(p), "content": c, "suggestion": s}
+                {
+                    "path": str(p),
+                    "content": c,
+                    "suggestion": s,
+                    "spec_quote": extract_xml_tag(s, "spec_quote"),
+                }
                 for p, c, s in context.generated_tests
             ]
             with open(tests_json, "w", encoding="utf-8") as f:

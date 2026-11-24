@@ -646,3 +646,40 @@ async def test_run_async_workflow_without_manifest_writes_no_checkout(
     await engine._run_async_workflow("feat-id")
 
     assert not (tmp_path / "state" / "wpt_checkout.json").exists()
+
+
+def test_save_phase_artifacts_records_spec_quote(
+    engine: WPTGenEngine, mock_config: Config, tmp_path: Path
+) -> None:
+    """Each generated test records the spec quote from its suggestion."""
+    mock_config.state_dir = str(tmp_path / "state")
+    context = WorkflowContext(
+        feature_id="feat",
+        generated_tests=[
+            (
+                Path("a.html"),
+                "content",
+                "<test_suggestion><description>D</description>"
+                "<spec_quote>It must throw.</spec_quote></test_suggestion>",
+            ),
+            (
+                Path("b.html"),
+                "content",
+                "<test_suggestion><description>D</description>"
+                "</test_suggestion>",
+            ),
+        ],
+    )
+
+    engine._save_phase_artifacts(context, WorkflowPhase.GENERATION)
+
+    tests_data = json.loads(
+        (tmp_path / "state" / "generated_tests.json").read_text()
+    )
+    assert tests_data[0]["spec_quote"] == "It must throw."
+    assert tests_data[1]["spec_quote"] is None
+
+    # The extra key doesn't break resuming from the saved artifacts.
+    hydrated = engine._hydrate_context("feat")
+    assert hydrated.generated_tests is not None
+    assert len(hydrated.generated_tests) == 2

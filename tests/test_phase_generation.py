@@ -23,6 +23,7 @@ from pytest_mock import MockerFixture
 from wptgen.config import Config
 from wptgen.models import FeatureMetadata, WorkflowContext
 from wptgen.phases.generation import (
+    _format_test_suggestion,
     _generate_adk_loop,
     run_single_test_generation,
     run_test_generation,
@@ -347,3 +348,33 @@ async def test_run_single_test_generation_no_feature_id(
 
     assert context.feature_id is None
     assert context.metadata.name == "custom_feature"
+
+
+def test_format_test_suggestion_brief_keeps_spec_quote() -> None:
+    """Brief suggestions drop extra tags but keep the spec quote."""
+    suggestion_xml = (
+        "<test_suggestion><title>T1</title>"
+        "<description>D1</description>"
+        "<spec_quote>It must throw a TypeError.</spec_quote>"
+        "<steps><step>1. S</step></steps></test_suggestion>"
+    )
+
+    brief = _format_test_suggestion(
+        suggestion_xml, "feat", ["url"], sanitize=True
+    )
+
+    assert "<spec_quote>It must throw a TypeError.</spec_quote>" in brief
+    assert "<title>" not in brief
+    assert "<steps>" not in brief
+
+
+def test_format_test_suggestion_brief_without_spec_quote() -> None:
+    """Suggestions without a spec quote don't get an empty one."""
+    brief = _format_test_suggestion(
+        "<test_suggestion><description>D1</description></test_suggestion>",
+        "feat",
+        ["url"],
+        sanitize=True,
+    )
+
+    assert "<spec_quote>" not in brief

@@ -168,6 +168,10 @@ def _format_test_suggestion(
         )
         lines = ["<test_suggestion>"]
         lines.append(f"  <description>{description}</description>")
+        # Keep the spec quote so generated tests stay traceable to the spec.
+        spec_quote = extract_xml_tag(suggestion_xml, "spec_quote")
+        if spec_quote:
+            lines.append(f"  <spec_quote>{spec_quote}</spec_quote>")
         for url in spec_urls:
             lines.append(f"  <spec_url>{url}</spec_url>")
         if feature_id:
