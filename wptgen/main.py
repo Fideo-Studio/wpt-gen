@@ -565,7 +565,7 @@ def generate(
             "--rebuild-manifest",
             help=(
                 "Ignore the cached WPT web-features manifest for the "
-                "checkout's current state and download or build it again."
+                "checkout's current state and build it again."
             ),
         ),
     ] = False,
@@ -1135,7 +1135,7 @@ def chromestatus_command(
             "--rebuild-manifest",
             help=(
                 "Ignore the cached WPT web-features manifest for the "
-                "checkout's current state and download or build it again."
+                "checkout's current state and build it again."
             ),
         ),
     ] = False,
@@ -1803,7 +1803,7 @@ def audit(
             "--rebuild-manifest",
             help=(
                 "Ignore the cached WPT web-features manifest for the "
-                "checkout's current state and download or build it again."
+                "checkout's current state and build it again."
             ),
         ),
     ] = False,

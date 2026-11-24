@@ -14,12 +14,10 @@
 
 """Tests for resolving WPT's web-features manifest."""
 
-import gzip
 import json
 import os
 import subprocess
 import time
-import urllib.error
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -31,8 +29,6 @@ from wptgen.models import WorkflowContext
 from wptgen.web_features_manifest import (
     CACHE_SUBDIR,
     KEEP_CACHED_MANIFESTS,
-    ORIGIN_BUILT,
-    ORIGIN_DOWNLOADED,
     ResolvedManifest,
     WebFeaturesManifestError,
     WPTCheckout,
@@ -45,7 +41,6 @@ from wptgen.web_features_manifest import (
 )
 
 BUILT_DATA = {"grid": ["/css/grid.html"], "built": ["/built.html"]}
-DOWNLOADED_DATA = {"grid": ["/css/grid.html"], "downloaded": ["/dl.html"]}
 
 # Fake `./wpt`: writes BUILT_DATA to the -p path and logs each call.
 FAKE_WPT_SCRIPT = """#!/usr/bin/env python3
@@ -76,8 +71,6 @@ def _git(repo: Path, *args: str) -> str:
             "user.email=test@example.com",
             "-c",
             "commit.gpgsign=false",
-            "-c",
-            "tag.gpgsign=false",
             *args,
         ],
         check=True,
@@ -94,7 +87,7 @@ def _commit(repo: Path, message: str) -> str:
 
 @pytest.fixture
 def wpt_repo(tmp_path: Path) -> Path:
-    """A minimal WPT-like git checkout whose HEAD is tagged merge_pr_1."""
+    """A minimal WPT-like git checkout."""
     repo = tmp_path / "wpt"
     (repo / "css").mkdir(parents=True)
     _git(repo, "init", "-q")
@@ -103,7 +96,6 @@ def wpt_repo(tmp_path: Path) -> Path:
     wpt_script.write_text(FAKE_WPT_SCRIPT)
     wpt_script.chmod(0o755)
     _commit(repo, "initial")
-    _git(repo, "tag", "merge_pr_1")
     return repo
 
 
@@ -116,17 +108,6 @@ def build_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _build_count(log: Path) -> int:
     return len(log.read_text().splitlines()) if log.exists() else 0
-
-
-def _mock_download(mocker: MockerFixture, data: dict[str, Any]) -> MagicMock:
-    payload = gzip.compress(json.dumps({"version": 1, "data": data}).encode())
-    response = MagicMock()
-    response.read.return_value = payload
-    mock_urlopen = mocker.patch(
-        "wptgen.web_features_manifest.urllib.request.urlopen"
-    )
-    mock_urlopen.return_value.__enter__.return_value = response
-    return mock_urlopen
 
 
 @pytest.mark.parametrize(
@@ -235,36 +216,16 @@ def test_load_manifest_data_rereads_changed_file(tmp_path: Path) -> None:
     assert list(load_manifest_data(manifest)) == ["b"]
 
 
-def test_inspect_checkout_at_upstream_release(wpt_repo: Path) -> None:
+def test_inspect_checkout_clean(wpt_repo: Path) -> None:
     head = _git(wpt_repo, "rev-parse", "HEAD")
 
     checkout = inspect_checkout(wpt_repo)
 
     assert checkout.head == head
-    assert checkout.upstream_tag == "merge_pr_1"
-    assert checkout.upstream_commit == head
-    assert checkout.commits_ahead == 0
     assert not checkout.dirty
     assert checkout.dirty_fingerprint is None
-    assert checkout.is_upstream_release
     assert checkout.cache_key == head
-    assert checkout.describe() == f"merge_pr_1 ({head[:10]})"
-
-
-def test_inspect_checkout_ahead_of_upstream(wpt_repo: Path) -> None:
-    base = _git(wpt_repo, "rev-parse", "HEAD")
-    (wpt_repo / "css" / "new.html").write_text("new")
-    head = _commit(wpt_repo, "local work")
-
-    checkout = inspect_checkout(wpt_repo)
-
-    assert checkout.upstream_commit == base
-    assert checkout.head == head
-    assert checkout.commits_ahead == 1
-    assert not checkout.is_upstream_release
-    assert checkout.describe() == (
-        f"merge_pr_1 + 1 local commit (HEAD {head[:10]})"
-    )
+    assert checkout.describe() == f"HEAD {head[:10]}"
 
 
 def test_inspect_checkout_dirty_states(wpt_repo: Path) -> None:
@@ -274,7 +235,6 @@ def test_inspect_checkout_dirty_states(wpt_repo: Path) -> None:
 
     assert first.dirty
     assert first.dirty_fingerprint
-    assert not first.is_upstream_release
     assert first.cache_key.startswith(f"{first.head}-dirty-")
     assert first.describe().endswith(", with uncommitted changes")
 
@@ -289,104 +249,46 @@ def test_inspect_checkout_dirty_states(wpt_repo: Path) -> None:
     assert third.cache_key not in (first.cache_key, second.cache_key)
 
 
-def test_inspect_checkout_without_upstream_tags(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q")
-    (repo / "a.html").write_text("a")
-    head = _commit(repo, "initial")
-
-    checkout = inspect_checkout(repo)
-
-    assert checkout.upstream_tag is None
-    assert checkout.upstream_commit is None
-    assert checkout.commits_ahead is None
-    assert not checkout.is_upstream_release
-    assert checkout.describe() == (
-        f"{head[:10]} (no upstream release tag found)"
-    )
-
-
 def test_inspect_checkout_not_a_git_checkout(tmp_path: Path) -> None:
     with pytest.raises(WebFeaturesManifestError, match="not a git checkout"):
         inspect_checkout(tmp_path)
 
 
-def test_resolve_downloads_published_manifest_for_clean_release(
-    wpt_repo: Path, tmp_path: Path, build_log: Path, mocker: MockerFixture
+def test_resolve_builds_and_caches_per_commit(
+    wpt_repo: Path, tmp_path: Path, build_log: Path
 ) -> None:
-    mock_urlopen = _mock_download(mocker, DOWNLOADED_DATA)
     notify = MagicMock()
     head = _git(wpt_repo, "rev-parse", "HEAD")
 
     resolved = resolve_manifest(wpt_repo, tmp_path / "cache", notify=notify)
 
-    assert resolved.origin == ORIGIN_DOWNLOADED
-    assert resolved.source_url == (
-        "https://github.com/web-platform-tests/wpt/releases/download/"
-        f"merge_pr_1/WEB_FEATURES_MANIFEST-{head}.json.gz"
-    )
-    assert mock_urlopen.call_args.args[0] == resolved.source_url
-    assert load_manifest_data(resolved.path) == DOWNLOADED_DATA
-    assert _build_count(build_log) == 0
+    assert resolved.checkout.head == head
+    assert Path(resolved.path).name == f"{head}.json"
+    assert load_manifest_data(resolved.path) == BUILT_DATA
+    assert build_log.read_text().startswith("web-features-manifest -p ")
     notify.assert_called_once()
 
     # Same checkout state, so the cache is reused.
     again = resolve_manifest(wpt_repo, tmp_path / "cache")
     assert again == resolved
-    assert mock_urlopen.call_count == 1
-
-
-def test_resolve_falls_back_to_build_when_download_fails(
-    wpt_repo: Path, tmp_path: Path, build_log: Path, mocker: MockerFixture
-) -> None:
-    mocker.patch(
-        "wptgen.web_features_manifest.urllib.request.urlopen",
-        side_effect=urllib.error.URLError("offline"),
-    )
-
-    resolved = resolve_manifest(wpt_repo, tmp_path / "cache")
-
-    assert resolved.origin == ORIGIN_BUILT
-    assert resolved.source_url is None
-    assert load_manifest_data(resolved.path) == BUILT_DATA
     assert _build_count(build_log) == 1
 
-
-def test_resolve_builds_when_ahead_of_upstream(
-    wpt_repo: Path, tmp_path: Path, build_log: Path, mocker: MockerFixture
-) -> None:
-    mock_urlopen = mocker.patch(
-        "wptgen.web_features_manifest.urllib.request.urlopen"
-    )
+    # A new commit is a new checkout state.
     (wpt_repo / "css" / "local.html").write_text("local")
-    head = _commit(wpt_repo, "local mapping fix")
-
-    resolved = resolve_manifest(wpt_repo, tmp_path / "cache")
-
-    mock_urlopen.assert_not_called()
-    assert resolved.origin == ORIGIN_BUILT
-    assert resolved.checkout.head == head
-    assert resolved.checkout.commits_ahead == 1
-    assert Path(resolved.path).name == f"{head}.json"
-    assert build_log.read_text().startswith("web-features-manifest -p ")
-
-    resolve_manifest(wpt_repo, tmp_path / "cache")
-    assert _build_count(build_log) == 1
+    new_head = _commit(wpt_repo, "local mapping fix")
+    rebuilt = resolve_manifest(wpt_repo, tmp_path / "cache")
+    assert Path(rebuilt.path).name == f"{new_head}.json"
+    assert _build_count(build_log) == 2
 
 
 def test_resolve_builds_again_for_each_dirty_state(
-    wpt_repo: Path, tmp_path: Path, build_log: Path, mocker: MockerFixture
+    wpt_repo: Path, tmp_path: Path, build_log: Path
 ) -> None:
-    mock_urlopen = mocker.patch(
-        "wptgen.web_features_manifest.urllib.request.urlopen"
-    )
     (wpt_repo / "css" / "grid.html").write_text("edited")
     first = resolve_manifest(wpt_repo, tmp_path / "cache")
     (wpt_repo / "css" / "grid.html").write_text("edited again")
     second = resolve_manifest(wpt_repo, tmp_path / "cache")
 
-    mock_urlopen.assert_not_called()
     assert first.checkout.dirty
     assert second.checkout.dirty
     assert first.path != second.path
@@ -395,12 +297,8 @@ def test_resolve_builds_again_for_each_dirty_state(
 
 
 def test_resolve_rebuild_ignores_cache(
-    wpt_repo: Path, tmp_path: Path, build_log: Path, mocker: MockerFixture
+    wpt_repo: Path, tmp_path: Path, build_log: Path
 ) -> None:
-    mocker.patch(
-        "wptgen.web_features_manifest.urllib.request.urlopen",
-        side_effect=urllib.error.URLError("offline"),
-    )
     resolve_manifest(wpt_repo, tmp_path / "cache")
     resolve_manifest(wpt_repo, tmp_path / "cache", rebuild=True)
 
@@ -412,7 +310,6 @@ def test_resolve_build_failure_stops_with_wpt_output(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (wpt_repo / "css" / "grid.html").write_text("dirty, so no download")
     monkeypatch.setenv("FAKE_WPT_FAIL", "1")
 
     with pytest.raises(WebFeaturesManifestError) as excinfo:
@@ -428,7 +325,6 @@ def test_resolve_rejects_unknown_manifest_version(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (wpt_repo / "css" / "grid.html").write_text("dirty, so no download")
     monkeypatch.setenv("FAKE_WPT_VERSION", "2")
 
     with pytest.raises(WebFeaturesManifestError, match="version 2"):
@@ -438,7 +334,6 @@ def test_resolve_rejects_unknown_manifest_version(
 def test_resolve_build_timeout(
     wpt_repo: Path, tmp_path: Path, mocker: MockerFixture
 ) -> None:
-    (wpt_repo / "css" / "grid.html").write_text("dirty, so no download")
     real_run = subprocess.run
 
     def fake_run(cmd: list[str], **kwargs: Any) -> Any:
@@ -462,12 +357,8 @@ def test_resolve_without_wpt_script(wpt_repo: Path, tmp_path: Path) -> None:
 
 
 def test_resolve_replaces_corrupt_cache_entry(
-    wpt_repo: Path, tmp_path: Path, build_log: Path, mocker: MockerFixture
+    wpt_repo: Path, tmp_path: Path, build_log: Path
 ) -> None:
-    mocker.patch(
-        "wptgen.web_features_manifest.urllib.request.urlopen",
-        side_effect=urllib.error.URLError("offline"),
-    )
     first = resolve_manifest(wpt_repo, tmp_path / "cache")
     Path(first.path).write_text("{corrupt")
 
@@ -500,14 +391,10 @@ def test_prune_keeps_most_recent_manifests(tmp_path: Path) -> None:
 def _resolved() -> ResolvedManifest:
     return ResolvedManifest(
         path="/cache/abc.json",
-        origin=ORIGIN_BUILT,
         created_at="2026-11-16T00:00:00+00:00",
         checkout=WPTCheckout(
             root="/wpt",
             head="abc123",
-            upstream_tag="merge_pr_5",
-            upstream_commit="def456",
-            commits_ahead=2,
             dirty=True,
             dirty_fingerprint="f" * 64,
         ),
@@ -519,8 +406,7 @@ def test_resolved_manifest_round_trip() -> None:
 
     assert ResolvedManifest.from_dict(resolved.to_dict()) == resolved
     assert resolved.describe() == (
-        "built for merge_pr_5 + 2 local commits (HEAD abc123), "
-        "with uncommitted changes"
+        "built for HEAD abc123, with uncommitted changes"
     )
 
 

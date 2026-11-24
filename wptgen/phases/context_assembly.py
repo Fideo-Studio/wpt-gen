@@ -48,7 +48,7 @@ async def resolve_web_features_manifest(
     """Resolves the web-features manifest for the configured WPT checkout.
 
     Raises:
-        WorkflowError: If the manifest can't be downloaded or built.
+        WorkflowError: If the manifest can't be built.
     """
     assert config.wpt_path, "wpt_path is required to resolve the manifest"
     assert config.cache_path, "cache_path is required to resolve the manifest"
@@ -66,7 +66,7 @@ async def resolve_web_features_manifest(
 
     ui.info(
         f"WPT checkout: {resolved.checkout.describe()}. Web-features "
-        f"manifest {resolved.origin} {resolved.created_at}."
+        f"manifest built {resolved.created_at}."
     )
     if resolved.checkout.dirty:
         ui.warning(

@@ -34,16 +34,8 @@ from wptgen.web_features_manifest import (
 
 FAKE_MANIFEST = ResolvedManifest(
     path="/cache/web-features-manifest/abc.json",
-    origin="built",
     created_at="2026-11-16T00:00:00+00:00",
-    checkout=WPTCheckout(
-        root="/wpt",
-        head="abc",
-        upstream_tag="merge_pr_1",
-        upstream_commit="abc",
-        commits_ahead=0,
-        dirty=False,
-    ),
+    checkout=WPTCheckout(root="/wpt", head="abc", dirty=False),
 )
 
 

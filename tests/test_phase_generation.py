@@ -189,16 +189,8 @@ async def test_generate_adk_loop(
 def _manifest(path: Path) -> ResolvedManifest:
     return ResolvedManifest(
         path=str(path),
-        origin="built",
         created_at="2026-11-16T00:00:00+00:00",
-        checkout=WPTCheckout(
-            root="/wpt",
-            head="abc",
-            upstream_tag=None,
-            upstream_commit=None,
-            commits_ahead=None,
-            dirty=False,
-        ),
+        checkout=WPTCheckout(root="/wpt", head="abc", dirty=False),
     )
 
 

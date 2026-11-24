@@ -14,15 +14,12 @@
 
 """Resolution and caching of WPT's web-features manifest."""
 
-import gzip
 import hashlib
 import json
 import logging
 import os
 import subprocess
 import tempfile
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -33,23 +30,14 @@ logger = logging.getLogger(__name__)
 
 MANIFEST_VERSION = 1
 CACHE_SUBDIR = "web-features-manifest"
-UPSTREAM_TAG_PATTERN = "merge_pr_*"
-RELEASE_MANIFEST_URL = (
-    "https://github.com/web-platform-tests/wpt/releases/download/"
-    "{tag}/WEB_FEATURES_MANIFEST-{commit}.json.gz"
-)
 # Generous, since the first ./wpt run bootstraps WPT's virtualenv.
 BUILD_TIMEOUT_SECONDS = 1800
-DOWNLOAD_TIMEOUT_SECONDS = 60
 GIT_TIMEOUT_SECONDS = 120
 KEEP_CACHED_MANIFESTS = 5
 ERROR_OUTPUT_LINES = 40
 
 # URL suffixes of tests generated from a .js file (".any." is handled apart).
 _JS_SOURCE_URL_SUFFIXES = (".window.html", ".worker.html", ".extension.html")
-
-ORIGIN_DOWNLOADED = "downloaded"
-ORIGIN_BUILT = "built"
 
 
 class WebFeaturesManifestError(RuntimeError):
@@ -62,21 +50,8 @@ class WPTCheckout:
 
     root: str
     head: str
-    # Nearest merge_pr_* tag at or below HEAD.
-    upstream_tag: str | None
-    upstream_commit: str | None
-    commits_ahead: int | None
     dirty: bool
     dirty_fingerprint: str | None = None
-
-    @property
-    def is_upstream_release(self) -> bool:
-        """Whether HEAD is a clean upstream release commit."""
-        return (
-            not self.dirty
-            and self.upstream_commit is not None
-            and self.upstream_commit == self.head
-        )
 
     @property
     def cache_key(self) -> str:
@@ -87,16 +62,7 @@ class WPTCheckout:
 
     def describe(self) -> str:
         """Returns a short summary of the checkout state."""
-        if self.upstream_tag is None:
-            base = f"{self.head[:10]} (no upstream release tag found)"
-        elif self.commits_ahead:
-            plural = "s" if self.commits_ahead != 1 else ""
-            base = (
-                f"{self.upstream_tag} + {self.commits_ahead} local "
-                f"commit{plural} (HEAD {self.head[:10]})"
-            )
-        else:
-            base = f"{self.upstream_tag} ({self.head[:10]})"
+        base = f"HEAD {self.head[:10]}"
         if self.dirty:
             base += ", with uncommitted changes"
         return base
@@ -109,9 +75,6 @@ class WPTCheckout:
         return cls(
             root=data["root"],
             head=data["head"],
-            upstream_tag=data.get("upstream_tag"),
-            upstream_commit=data.get("upstream_commit"),
-            commits_ahead=data.get("commits_ahead"),
             dirty=data.get("dirty", False),
             dirty_fingerprint=data.get("dirty_fingerprint"),
         )
@@ -122,13 +85,11 @@ class ResolvedManifest:
     """A cached web-features manifest and the checkout it was made for."""
 
     path: str
-    origin: str  # ORIGIN_DOWNLOADED or ORIGIN_BUILT
     created_at: str
     checkout: WPTCheckout
-    source_url: str | None = None
 
     def describe(self) -> str:
-        return f"{self.origin} for {self.checkout.describe()}"
+        return f"built for {self.checkout.describe()}"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -139,10 +100,8 @@ class ResolvedManifest:
     def from_dict(cls, data: dict[str, Any]) -> "ResolvedManifest":
         return cls(
             path=data["path"],
-            origin=data["origin"],
             created_at=data["created_at"],
             checkout=WPTCheckout.from_dict(data["checkout"]),
-            source_url=data.get("source_url"),
         )
 
 
@@ -183,7 +142,7 @@ def _dirty_fingerprint(wpt_root: Path, status: bytes) -> str:
 
 
 def inspect_checkout(wpt_root: Path) -> WPTCheckout:
-    """Reads the HEAD commit, upstream base and dirty state of a checkout."""
+    """Reads the HEAD commit and dirty state of a checkout."""
     root = wpt_root.resolve()
     head = _git_text(root, "rev-parse", "HEAD")
     if not head:
@@ -191,24 +150,6 @@ def inspect_checkout(wpt_root: Path) -> WPTCheckout:
             f"{root} is not a git checkout (or git is unavailable). wpt-gen "
             "needs a git checkout of WPT to resolve its web-features manifest."
         )
-
-    upstream_tag = _git_text(
-        root,
-        "describe",
-        "--tags",
-        "--match",
-        UPSTREAM_TAG_PATTERN,
-        "--abbrev=0",
-        "HEAD",
-    )
-    upstream_commit = None
-    commits_ahead = None
-    if upstream_tag:
-        upstream_commit = _git_text(root, "rev-list", "-n", "1", upstream_tag)
-        ahead = _git_text(root, "rev-list", "--count", f"{upstream_tag}..HEAD")
-        commits_ahead = int(ahead) if ahead and ahead.isdigit() else None
-    else:
-        upstream_tag = None
 
     status = _git(
         root, "status", "--porcelain=v1", "-z", "--untracked-files=all"
@@ -223,9 +164,6 @@ def inspect_checkout(wpt_root: Path) -> WPTCheckout:
     return WPTCheckout(
         root=str(root),
         head=head,
-        upstream_tag=upstream_tag,
-        upstream_commit=upstream_commit,
-        commits_ahead=commits_ahead,
         dirty=dirty,
         dirty_fingerprint=(
             _dirty_fingerprint(root, status.stdout) if dirty else None
@@ -284,23 +222,6 @@ def load_manifest_data(path: str | Path) -> dict[str, list[str]]:
 
 def _tail(text: str, lines: int = ERROR_OUTPUT_LINES) -> str:
     return "\n".join(text.strip().splitlines()[-lines:])
-
-
-def _download_release_manifest(checkout: WPTCheckout, dest: Path) -> str:
-    """Downloads WPT's published manifest and returns its URL."""
-    assert checkout.upstream_tag
-    assert checkout.upstream_commit
-    url = RELEASE_MANIFEST_URL.format(
-        tag=checkout.upstream_tag, commit=checkout.upstream_commit
-    )
-    with urllib.request.urlopen(  # noqa: S310 - fixed https URL
-        url, timeout=DOWNLOAD_TIMEOUT_SECONDS
-    ) as response:
-        payload = response.read()
-    raw = json.loads(gzip.decompress(payload).decode("utf-8"))
-    _validate_manifest(raw, url)
-    dest.write_text(json.dumps(raw), encoding="utf-8")
-    return url
 
 
 def _build_manifest(wpt_root: Path, dest: Path) -> None:
@@ -396,8 +317,8 @@ def resolve_manifest(
 ) -> ResolvedManifest:
     """Returns the web-features manifest for the checkout's current state.
 
-    Uses the cache if possible. Otherwise downloads WPT's published manifest
-    (clean upstream release commits only) or builds one locally.
+    Uses the cache if possible, otherwise builds one with
+    `./wpt web-features-manifest`.
 
     Args:
         wpt_root: The WPT checkout.
@@ -426,49 +347,18 @@ def resolve_manifest(
     )
     os.close(fd)
     tmp_path = Path(tmp_name)
-    origin = None
-    source_url = None
     try:
-        if checkout.is_upstream_release:
-            try:
-                if notify:
-                    notify(
-                        "Downloading WPT's published web-features manifest "
-                        f"for {checkout.upstream_tag}..."
-                    )
-                source_url = _download_release_manifest(checkout, tmp_path)
-                origin = ORIGIN_DOWNLOADED
-            except (
-                OSError,
-                urllib.error.URLError,
-                json.JSONDecodeError,
-                WebFeaturesManifestError,
-            ) as e:
-                logger.warning(
-                    "Could not download the published web-features manifest "
-                    f"for {checkout.upstream_tag} ({e}); building it locally "
-                    "instead."
-                )
-
-        if origin is None:
-            if notify:
-                notify(
-                    "Building WPT's web-features manifest (about a "
-                    "minute)..."
-                )
-            _build_manifest(root, tmp_path)
-            origin = ORIGIN_BUILT
-
+        if notify:
+            notify("Building WPT's web-features manifest (about a minute)...")
+        _build_manifest(root, tmp_path)
         os.replace(tmp_path, manifest_path)
     finally:
         tmp_path.unlink(missing_ok=True)
 
     resolved = ResolvedManifest(
         path=str(manifest_path),
-        origin=origin,
         created_at=datetime.now(UTC).isoformat(timespec="seconds"),
         checkout=checkout,
-        source_url=source_url,
     )
     meta_tmp = meta_path.with_suffix(f".{os.getpid()}.tmp")
     meta_tmp.write_text(

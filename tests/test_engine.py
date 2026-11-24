@@ -596,17 +596,8 @@ async def test_run_async_workflow_records_wpt_checkout(
     engine.config.suggestions_only = True
     manifest = ResolvedManifest(
         path="/cache/abc.json",
-        origin="downloaded",
         created_at="2026-11-16T00:00:00+00:00",
-        checkout=WPTCheckout(
-            root="/wpt",
-            head="abc",
-            upstream_tag="merge_pr_1",
-            upstream_commit="abc",
-            commits_ahead=0,
-            dirty=False,
-        ),
-        source_url="https://example.test/manifest.json.gz",
+        checkout=WPTCheckout(root="/wpt", head="abc", dirty=False),
     )
     context = WorkflowContext(
         feature_id="feat-id", web_features_manifest=manifest

@@ -19,12 +19,9 @@ wpt-gen generate [OPTIONS] WEB_FEATURE_ID
 
 ### How existing tests are found
 
-`wpt-gen` reads WPT's own `WEB_FEATURES_MANIFEST.json` to find the tests mapped to a feature, so it always matches WPT's `WEB_FEATURES.yml` rules. At the start of each run it resolves the manifest for the checkout's current state:
+`wpt-gen` reads WPT's own `WEB_FEATURES_MANIFEST.json` to find the tests mapped to a feature, so it always matches WPT's `WEB_FEATURES.yml` rules. At the start of each run it builds the manifest for the checkout's current state (HEAD plus any uncommitted changes) with `./wpt web-features-manifest`.
 
-- If HEAD is an upstream WPT release commit (tagged `merge_pr_<N>`) and the working tree is clean, it downloads the manifest WPT published for that commit.
-- Otherwise (local commits, uncommitted changes) it builds one with `./wpt web-features-manifest`, which takes about a minute.
-
-Manifests are cached per checkout state in `<cache>/web-features-manifest/` and reused by later runs. If the manifest can't be obtained, the run stops. Each run records the checkout it used (HEAD, upstream base, uncommitted changes) in `wpt_checkout.json` in the state directory.
+Manifests are cached per checkout state in `<cache>/web-features-manifest/` and reused by later runs. If the manifest can't be obtained, the run stops. Each run records the checkout it used (HEAD, uncommitted changes) in `wpt_checkout.json` in the state directory.
 
 ### Options
 
@@ -51,7 +48,7 @@ Manifests are cached per checkout state in `<cache>/web-features-manifest/` and 
 | `--yes-cache` | Automatically use the cache if it exists without prompting. |
 | `--no-cache` | Automatically ignore and overwrite the cache if it exists without prompting. |
 | `--max-parallel-requests` | Limit the number of concurrent asynchronous LLM requests. |
-| `--rebuild-manifest` | Download or build WPT's web-features manifest again instead of using the cached one for the checkout's current state. Not affected by `--no-cache`. |
+| `--rebuild-manifest` | Build WPT's web-features manifest again instead of using the cached one for the checkout's current state. Not affected by `--no-cache`. |
 
 #### Model Configuration
 | Option | Description |
