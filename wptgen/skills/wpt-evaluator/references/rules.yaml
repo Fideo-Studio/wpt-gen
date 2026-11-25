@@ -23,11 +23,15 @@
 #     Leave `rule` a faithful distillation of the doc and put our own
 #     operational scope here. Do not update `notes` during an upstream refresh.
 #
-# See ../UPSTREAM.md for the pinned upstream commit and refresh procedure.
+# `wpt_upstream_commit` below is the single record of the upstream commit
+# these rules were checked against. See ../UPSTREAM.md for the refresh
+# procedure.
 # See ../SKILL.md for how this corpus is consumed.
 
-version: 0.3.0
-wpt_upstream_commit: f5a7deaba2bffac7a534dfafaa3baf14b9a253cf
+version: 0.4.0
+# merge_pr_65618, 2026-11-23. benchmarks/manifest.yaml must match
+# (enforced by tests/test_evaluator_pin.py).
+wpt_upstream_commit: ead4350d59e92c6b14484d910da87bc3096635b3
 
 # Source-document prefixes (used as rule ID prefixes):
 #   GENERAL          writing-tests/general-guidelines.md
@@ -597,6 +601,20 @@ rules:
       to verify exception behavior. Ensure provided instances do not
       cause destructive side-effects.
 
+  - id: IDLHARNESS-005
+    source: wpt/docs/writing-tests/idlharness.md#L103-L117
+    applies_to: [idl]
+    severity: warn
+    layer: semantic
+    rule: |
+      To exclude specific interfaces or members from the generated IDL
+      tests, use `idl_array.set_test_filter(predicate)`, called in the
+      setup callback passed to `idl_test()`. The predicate receives an
+      interface name and, for member tests, a member name, and returns
+      `true` to include the tests. Filtering applies after partial
+      interfaces and mixins are merged, so mixin members are filtered
+      under the name of the interface that includes them.
+
   # ─── testdriver ────────────────────────────────────────────────────────
 
   - id: TESTDRIVER-001
@@ -629,7 +647,7 @@ rules:
       script=/resources/testdriver.js?feature=bidi` for JS-only tests).
 
   - id: TESTDRIVER-004
-    source: wpt/docs/writing-tests/testdriver.md#L253-L260
+    source: wpt/docs/writing-tests/testdriver.md#L260-L267
     applies_to: [testharness, reftest]
     severity: warn
     layer: semantic

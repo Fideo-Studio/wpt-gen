@@ -13,8 +13,8 @@ on each upstream refresh.
 
 This analysis was performed against upstream's rule inventory at
 `wpt/tools/lint/rules.py` (plus the detection logic in
-`wpt/tools/lint/lint.py`) as of the commit pinned in
-[`UPSTREAM.md`](../UPSTREAM.md). **Both the corpus and the upstream linter
+`wpt/tools/lint/lint.py`) as of `wpt_upstream_commit` in
+[`rules.yaml`](rules.yaml) (last re-checked 2026-11-24, at `merge_pr_65618`). **Both the corpus and the upstream linter
 change independently, so this mapping is not permanent — re-check it on
 every refresh** (see the refresh procedure in `UPSTREAM.md`).
 
@@ -25,14 +25,14 @@ anything covered by `wpt lint`"). wpt-gen does not re-check them.
 
 | rules.yaml | upstream lint rule |
 | ---------- | ------------------ |
-| TESTHARNESS-001    | `MISSING-TESTHARNESSREPORT` / `MULTIPLE-TESTHARNESS` |
+| TESTHARNESS-001    | `MISSING-TESTHARNESSREPORT` / `TESTHARNESSREPORT-WITHOUT-TESTHARNESS` / `MULTIPLE-TESTHARNESS` |
 | TESTHARNESS-007    | `TESTHARNESS-PATH` / `TESTHARNESS-IN-OTHER-TYPE` / `EARLY-TESTHARNESSREPORT` |
 | GENERAL-001   | `PATH LENGTH` |
 | GENERAL-003   | `DUPLICATE-BASENAME-PATH` / `DUPLICATE-CASE-INSENSITIVE-PATH` |
 | MANUAL-002 / VISUAL-001 | `CONTENT-MANUAL` / `CONTENT-VISUAL` |
 | TESTHARNESS-009   | `VARIANT-MISSING` / `MALFORMED-VARIANT` |
 | CSS-METADATA-001   | `MISSING-LINK` |
-| TESTDRIVER-002    | `MISSING-TESTDRIVER-VENDOR` / `MULTIPLE-TESTDRIVER` / `TESTDRIVER-PATH` |
+| TESTDRIVER-002    | `MISSING-TESTDRIVER-VENDOR` / `TESTDRIVER-VENDOR-WITHOUT-TESTDRIVER` / `MULTIPLE-TESTDRIVER` / `TESTDRIVER-PATH` |
 | REFTESTS-005 | `MISSING-REFTESTWAIT` |
 | REFTESTS-001 (partial) | `NON-EXISTENT-REF` / `SAME-FILE-REF` / `ABSOLUTE-URL-REF` |
 | SERVER-FEATURES-002 (partial)   | `W3C-TEST.ORG` / `WEB-PLATFORM.TEST` (hardcoded-host strings only) |

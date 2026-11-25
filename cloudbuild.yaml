@@ -36,8 +36,11 @@
 #                   float floor; blank = off. Prefer `auto`. Default blank on the
 #                   regression tier (3 reps has too few samples to fail on);
 #                   set `auto` on the release tier (8 reps).
-#   _WPT_PIN        wpt commit to check out; keep in sync with
-#                   benchmarks/manifest.yaml:wpt_upstream_commit
+#   _WPT_PIN        override the wpt commit to check out. Blank (the default)
+#                   reads `wpt_upstream_commit` from benchmarks/manifest.yaml,
+#                   the single source for the pin. Set it only to try another
+#                   commit; the harness then warns that HEAD differs from the
+#                   manifest.
 substitutions:
   _PROVIDER: ''
   _JOBS: '16'
@@ -45,7 +48,7 @@ substitutions:
   _SELECT: ''
   _MIN_RECALL: '1.0'
   _MIN_STABILITY: 'auto'
-  _WPT_PIN: 'f5a7deaba2bffac7a534dfafaa3baf14b9a253cf'
+  _WPT_PIN: ''
   _PR_NUMBER: ''
 
 steps:
@@ -55,9 +58,19 @@ steps:
     args:
       - -c
       - |
+        set -euo pipefail
+        pin="${_WPT_PIN}"
+        if [ -z "$${pin}" ]; then
+          pin=$$(sed -n 's/^wpt_upstream_commit: *//p' benchmarks/manifest.yaml)
+        fi
+        if ! [[ "$${pin}" =~ ^[0-9a-f]{40}$$ ]]; then
+          echo "Invalid wpt pin: '$${pin}' (expected a 40-character commit)" >&2
+          exit 1
+        fi
+        echo "Checking out wpt at $${pin}"
         git clone --filter=blob:none \
           https://github.com/web-platform-tests/wpt.git /workspace/wpt
-        git -C /workspace/wpt checkout "${_WPT_PIN}"
+        git -C /workspace/wpt checkout "$${pin}"
 
   # Install and run in one Python step so the venv/deps persist across the
   # invocation. Authenticates natively with Vertex AI via the service account

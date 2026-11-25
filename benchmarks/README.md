@@ -364,14 +364,17 @@ still resolves.
   benchmark out.
 - `version` — manifest schema version.
 - `rules_version` — the `rules.yaml` corpus version the `expect` labels were
-  authored against (currently `0.2.0`). The staleness tripwire for the
-  labels: re-review the seeds when `rules.yaml` bumps its version. (An
-  automatic harness cross-check against `rules.yaml`'s own version is not yet
-  implemented.)
+  authored against. The staleness tripwire for the labels: re-review the
+  seeds when `rules.yaml` bumps its version, then update this.
+  `tests/test_evaluator_pin.py` fails while it differs from `rules.yaml`'s
+  `version`.
 - `wpt_upstream_commit` — the checkout corpus entries are pinned to. Corpus
   files must be byte-identical across runs or consistency numbers are not
   comparable. The harness warns (not fails) on mismatch and records the
-  actual commit in run metadata.
+  actual commit in run metadata. It must equal `wpt_upstream_commit` in
+  `rules.yaml` (checked by `tests/test_evaluator_pin.py`), and Cloud Build
+  checks out this commit, so it's the only place to change when moving the
+  pin. See the refresh procedure in `wptgen/skills/wpt-evaluator/UPSTREAM.md`.
 
 Entries live in two top-level lists — `corpus:` and `seeds:` — so each entry
 has a single, total shape (no `role` tag, no fields that apply to only half

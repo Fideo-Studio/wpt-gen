@@ -15,10 +15,13 @@ version: 2
 # The staleness tripwire for the labels: when rules.yaml bumps its version,
 # re-review the seeds and update this. (The harness cross-check against
 # rules.yaml's own version is not yet implemented.)
-rules_version: 0.3.0
+rules_version: 0.4.0
 
 # The wpt checkout the corpus entries and the docs reading list are pinned to.
-wpt_upstream_commit: f5a7deaba2bffac7a534dfafaa3baf14b9a253cf
+# Must equal `wpt_upstream_commit` in
+# wptgen/skills/wpt-evaluator/references/rules.yaml (enforced by
+# tests/test_evaluator_pin.py). Cloud Build reads it from here.
+wpt_upstream_commit: ead4350d59e92c6b14484d910da87bc3096635b3
 
 # --- Consistency corpus ---------------------------------------------------
 # Real merged wpt files, referenced by path inside the checkout. No gold
