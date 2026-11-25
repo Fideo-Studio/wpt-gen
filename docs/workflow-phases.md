@@ -43,3 +43,17 @@ The `wpt-gen generate` command orchestrates a complex, multi-phase agentic workf
     *   **System Prompt:** `test_generation_system.jinja`
     *   **User Prompt:** `test_generation.jinja`
 
+
+## Phase 5: Web Features Mapping (`mapping.py`)
+
+*   **Responsibility:** Maps each generated test to the web features it covers, in its directory's `WEB_FEATURES.yml` (RFC 237 `rules:` format), and checks the result with WPT's own tooling.
+*   **Inputs:** `WorkflowContext` (generated tests, the feature IDs the generator declared for each test, and the manifest resolved at the start of the run), `Config`, `UIProvider`, the state directory.
+*   **Steps:**
+    1. WPT's `SourceFile` decides which generated files are tests; references and helpers are never mapped.
+    2. Each test is mapped to the features the generator declared for it (by default, the target feature only), plus any it was already mapped to.
+    3. The planned mappings are listed and confirmed before anything is written. Mappings that need a judgment call are flagged for review: extra features the generator declared (with its reason), existing mappings that are kept, and features the directory's rules add. `--yes-tests` skips the prompt. Feature IDs that aren't in web-features stop the run.
+    4. `wptgen/metadata.py` writes the rules as text, keeping comments and rule order.
+    5. If any file changed, WPT's web-features manifest is rebuilt from the working tree. The phase fails if a test isn't mapped as planned, or if another test under an edited directory lost a mapping.
+*   **Outputs:** `web_features_mapping.json` and `web_features_manifest.after.json` (not cached) in the state directory.
+*   **LLM Integration:** None. The generator declares features through `report_generation_complete`.
+*   **Opt out:** `--no-wf-yml-update`. Not run for ChromeStatus IDs.

@@ -28,6 +28,7 @@ from wptgen.phases.coverage_audit import (
     provide_coverage_report,
     run_coverage_audit,
 )
+from wptgen.phases.mapping import run_web_features_mapping
 from wptgen.phases.generation import run_test_generation
 from wptgen.phases.requirements_extraction import (
     run_requirements_extraction,
@@ -164,6 +165,11 @@ class WPTGenEngine:
                         )
                         for item in tests_data
                     ]
+                    context.feature_mappings = {
+                        item["path"]: item["feature_mapping"]
+                        for item in tests_data
+                        if item.get("feature_mapping")
+                    }
             except Exception:
                 pass
         else:
@@ -234,6 +240,7 @@ class WPTGenEngine:
                     "content": c,
                     "suggestion": s,
                     "spec_quote": extract_xml_tag(s, "spec_quote"),
+                    "feature_mapping": context.feature_mappings.get(str(p)),
                 }
                 for p, c, s in context.generated_tests
             ]
@@ -407,6 +414,17 @@ class WPTGenEngine:
             self._save_phase_artifacts(context, WorkflowPhase.GENERATION)
         elif context.generated_tests:
             self.ui.success("Skipping Phase 4: Tests already generated.")
+
+        # Phase 5: Map generated tests to the feature in WEB_FEATURES.yml.
+        # Runs on resumed runs too; mapping an already mapped test is a no-op.
+        if (
+            context.generated_tests
+            and self.config.map_web_features
+            and not self.config.chromestatus
+        ):
+            run_web_features_mapping(
+                context, self.config, self.ui, self._state_dir()
+            )
 
         # Final cleanup of resume file on success
         self._get_resume_file_path(feature_id).unlink(missing_ok=True)

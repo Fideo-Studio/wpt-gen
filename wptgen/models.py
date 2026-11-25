@@ -192,6 +192,8 @@ class WorkflowContext:
     approved_suggestions_xml: list[str] = field(default_factory=list)
     mdn_contents: list[str] | None = None
     generated_tests: list[tuple[Path, str, str]] | None = None
+    # Feature IDs the generator declared per test path, with its reason.
+    feature_mappings: dict[str, dict[str, Any]] = field(default_factory=dict)
     wpt_urls: list[str] | None = None
     markdown_report: str | None = None
     # Manifest and checkout state captured at the start of the run.
@@ -217,6 +219,7 @@ class WorkflowContext:
                 if self.generated_tests
                 else None
             ),
+            "feature_mappings": self.feature_mappings,
             "wpt_urls": self.wpt_urls,
             "markdown_report": self.markdown_report,
             "web_features_manifest": (
@@ -266,6 +269,7 @@ class WorkflowContext:
             approved_suggestions_xml=data.get("approved_suggestions_xml", []),
             mdn_contents=data.get("mdn_contents"),
             generated_tests=generated_tests,
+            feature_mappings=data.get("feature_mappings") or {},
             wpt_urls=data.get("wpt_urls"),
             markdown_report=data.get("markdown_report"),
             web_features_manifest=(

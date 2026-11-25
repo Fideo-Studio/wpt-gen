@@ -674,3 +674,70 @@ def test_save_phase_artifacts_records_spec_quote(
     hydrated = engine._hydrate_context("feat")
     assert hydrated.generated_tests is not None
     assert len(hydrated.generated_tests) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("map_web_features", "chromestatus", "generated", "expect_call"),
+    [
+        (True, False, [("t.html", "c", "s")], True),
+        (False, False, [("t.html", "c", "s")], False),
+        (True, True, [("t.html", "c", "s")], False),
+        (True, False, [], False),
+    ],
+)
+async def test_phase_5_maps_generated_tests(
+    engine: WPTGenEngine,
+    mocker: MockerFixture,
+    map_web_features: bool,
+    chromestatus: bool,
+    generated: list[tuple[str, str, str]],
+    expect_call: bool,
+) -> None:
+    """Phase 5 runs after generation unless turned off or on ChromeStatus IDs."""
+    engine.config.map_web_features = map_web_features
+    engine.config.chromestatus = chromestatus
+    context = WorkflowContext(feature_id="feat-id")
+    mocker.patch("wptgen.engine.run_context_assembly", return_value=context)
+    mocker.patch(
+        "wptgen.engine.run_requirements_extraction_categorized",
+        return_value="reqs",
+    )
+    mocker.patch("wptgen.engine.run_coverage_audit", return_value="audit")
+    mocker.patch("wptgen.engine.run_test_generation", return_value=generated)
+    mapping = mocker.patch("wptgen.engine.run_web_features_mapping")
+
+    await engine._run_async_workflow("feat-id")
+
+    assert mapping.called is expect_call
+    if expect_call:
+        args = mapping.call_args.args
+        assert args[0].generated_tests == generated
+        assert args[3] == engine._state_dir()
+
+
+@pytest.mark.asyncio
+async def test_phase_5_failure_keeps_resume_state(
+    engine: WPTGenEngine, mocker: MockerFixture
+) -> None:
+    """A failed mapping leaves the resume file, so --resume retries only it."""
+    context = WorkflowContext(feature_id="feat-id")
+    mocker.patch("wptgen.engine.run_context_assembly", return_value=context)
+    mocker.patch(
+        "wptgen.engine.run_requirements_extraction_categorized",
+        return_value="reqs",
+    )
+    mocker.patch("wptgen.engine.run_coverage_audit", return_value="audit")
+    mocker.patch(
+        "wptgen.engine.run_test_generation",
+        return_value=[("t.html", "c", "s")],
+    )
+    mocker.patch(
+        "wptgen.engine.run_web_features_mapping",
+        side_effect=WorkflowError("mapping failed"),
+    )
+
+    with pytest.raises(WorkflowError, match="mapping failed"):
+        await engine._run_async_workflow("feat-id")
+
+    assert engine._get_resume_file_path("feat-id").exists()

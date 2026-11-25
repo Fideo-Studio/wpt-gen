@@ -85,8 +85,21 @@ async def test_generate_test_with_adk(
         )
         assert completion_tool is not None
 
-        # Simulate the LLM calling the tool with the generated path
-        completion_tool.func([str(test_file)])
+        # Simulate the LLM calling the tool with the generated path and its
+        # declared features. Entries outside the checkout or without IDs are
+        # ignored.
+        completion_tool.func(
+            [str(test_file)],
+            feature_mappings=[
+                {
+                    "path": str(test_file),
+                    "feature_ids": ["my-feature", "other"],
+                    "reason": "needs other to observe it",
+                },
+                {"path": "/elsewhere.html", "feature_ids": ["x"]},
+                {"path": str(test_file)},
+            ],
+        )
 
         # Yield an empty mock event to simulate the stream finishing
         yield MagicMock()
@@ -138,6 +151,12 @@ async def test_generate_test_with_adk(
     assert len(results) == 1
     assert results[0][0] == test_file.resolve()
     assert "<!DOCTYPE html>" in results[0][1]
+    assert context.feature_mappings == {
+        str(test_file.resolve()): {
+            "feature_ids": ["my-feature", "other"],
+            "reason": "needs other to observe it",
+        }
+    }
     msg = (
         "wpt-generator skill directory not found. Agent will generate tests "
         "without skill guidance."

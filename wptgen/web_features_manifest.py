@@ -417,3 +417,44 @@ def feature_test_paths(
         else:
             paths.add(str(source))
     return sorted(paths), unmapped
+
+
+def build_manifest_at(wpt_root: str | Path, dest: str | Path) -> Path:
+    """Builds the manifest for the checkout as it stands now, at `dest`.
+
+    Not cached: used for the "after" manifest a run saves with its outputs,
+    once generated tests and `WEB_FEATURES.yml` edits are in the tree.
+    """
+    target = Path(dest)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _build_manifest(Path(wpt_root).resolve(), target)
+    return target
+
+
+def _url_source_candidates(url: str) -> set[str]:
+    """Repo-relative source paths a test URL may come from, by name alone."""
+    rel = url.split("#", 1)[0].split("?", 1)[0].lstrip("/")
+    candidates = {rel}
+    directory, _, filename = rel.rpartition("/")
+    prefix = f"{directory}/" if directory else ""
+    if ".any." in filename:
+        stem = filename[: filename.index(".any.") + len(".any.")]
+        candidates.add(f"{prefix}{stem}js")
+    for suffix in _JS_SOURCE_URL_SUFFIXES:
+        if filename.endswith(suffix):
+            candidates.add(prefix + filename.removesuffix(".html") + ".js")
+    return candidates
+
+
+def features_for_paths(
+    manifest_path: str | Path, rel_paths: list[str]
+) -> dict[str, list[str]]:
+    """The features a manifest maps each repo-relative source path to."""
+    wanted = set(rel_paths)
+    found: dict[str, list[str]] = {p: [] for p in rel_paths}
+    for feature, urls in load_manifest_data(manifest_path).items():
+        for url in urls:
+            for path in _url_source_candidates(url) & wanted:
+                if feature not in found[path]:
+                    found[path].append(feature)
+    return found

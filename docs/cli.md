@@ -23,6 +23,8 @@ wpt-gen generate [OPTIONS] WEB_FEATURE_ID
 
 Manifests are cached per checkout state in `<cache>/web-features-manifest/` and reused by later runs. If the manifest can't be obtained, the run stops. Each run records the checkout it used (HEAD, uncommitted changes) in `wpt_checkout.json` in the state directory.
 
+After generation, `wpt-gen` maps each new test to the features the generator declared for it, asks you to confirm the mappings (flagging any beyond the target feature), and, if any `WEB_FEATURES.yml` changed, rebuilds the manifest to check the result (about a minute). The rebuilt manifest is saved with the run's outputs rather than cached.
+
 ### Options
 
 #### General Options
@@ -32,7 +34,7 @@ Manifests are cached per checkout state in `<cache>/web-features-manifest/` and 
 | `--wpt-dir` | `-w` | Override the path to the local web-platform-tests repository. | From config |
 | `--config` | `-c` | Path to a custom `wpt-gen.yml` file. | `~/.wpt-gen.yml` |
 | `--output-dir` | `-o` | Directory where generated tests will be saved. | Local WPT repo |
-| `--wf-yml-update` | | Update `WEB_FEATURES.yml` with generated tests. | |
+| `--wf-yml-update` / `--no-wf-yml-update` | | Map each generated test to the feature in its directory's `WEB_FEATURES.yml` (RFC 237 `rules:` format), then rebuild WPT's web-features manifest to check it. See [Phase 5](workflow-phases.md#phase-5-web-features-mapping-mappingpy). | On |
 | `--tentative` | | Generate test files with the `.tentative` flag. | |
 
 #### Execution Control

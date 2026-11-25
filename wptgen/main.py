@@ -49,7 +49,6 @@ from wptgen.context import (
 )
 from wptgen.engine import WPTGenEngine
 from wptgen.llm import LLMTimeoutError
-from wptgen.metadata import update_web_features_yml
 from wptgen.models import (
     BrowserChannel,
     BrowserType,
@@ -135,8 +134,6 @@ app = typer.Typer(
 
 def _check_workflow_flags(
     ui: UIProvider,
-    wf_yml_update: bool,
-    output_dir: Path | None,
     use_lightweight: bool,
     use_reasoning: bool,
     yes_cache: bool,
@@ -148,8 +145,6 @@ def _check_workflow_flags(
 
     Args:
         ui: The UI provider for reporting errors.
-        wf_yml_update: Whether to update WEB_FEATURES.yml.
-        output_dir: Target directory for generated tests.
         use_lightweight: Whether lightweight model is requested.
         use_reasoning: Whether reasoning model is requested.
         yes_cache: Whether to force cache use.
@@ -160,10 +155,6 @@ def _check_workflow_flags(
     Raises:
         typer.Exit: If flag combinations are invalid.
     """
-    if wf_yml_update and not output_dir:
-        ui.error("--output-dir is required when using --wf-yml-update.")
-        raise typer.Exit(code=1)
-
     if use_lightweight and use_reasoning:
         ui.error("Cannot use both --use-lightweight and --use-reasoning.")
         raise typer.Exit(code=1)
@@ -246,8 +237,6 @@ def _execute_workflow(
     ui: UIProvider,
     feature_id: str,
     config: Any,
-    wf_yml_update: bool,
-    output_dir: Path | None,
     is_audit: bool = False,
     disable_directory_inference: bool = False,
 ) -> None:
@@ -257,8 +246,6 @@ def _execute_workflow(
         ui: The UI provider for the workflow.
         feature_id: The ID of the web feature.
         config: Resolved configuration object.
-        wf_yml_update: Whether to update WEB_FEATURES.yml.
-        output_dir: Directory to save tests.
         is_audit: Whether this is a suggestions-only audit run.
         disable_directory_inference: Whether to skip directory inference.
     """
@@ -270,7 +257,7 @@ def _execute_workflow(
 
     # Execute the workflow
     try:
-        context = engine.run_workflow(
+        engine.run_workflow(
             feature_id,
             disable_directory_inference=disable_directory_inference,
         )
@@ -282,14 +269,6 @@ def _execute_workflow(
         ui.print()
         ui.success("Audit completed successfully! Test suggestions generated.")
     else:
-        target_dir = output_dir or (
-            Path(config.output_dir) if config.output_dir else None
-        )
-        if wf_yml_update and target_dir and context and context.generated_tests:
-            generated_paths = [path for path, _, _ in context.generated_tests]
-            update_web_features_yml(target_dir, feature_id, generated_paths)
-            ui.success(f"Updated WEB_FEATURES.yml for {feature_id}")
-
         ui.print()
         ui.success("Workflow completed successfully!")
 
@@ -340,10 +319,14 @@ def generate(
     wf_yml_update: Annotated[
         bool,
         typer.Option(
-            "--wf-yml-update",
-            help="Update WEB_FEATURES.yml with generated tests.",
+            "--wf-yml-update/--no-wf-yml-update",
+            help=(
+                "Map each generated test to the feature in its directory's "
+                "WEB_FEATURES.yml, then rebuild WPT's web-features manifest "
+                "to check it (on by default)."
+            ),
         ),
-    ] = False,
+    ] = True,
     config_path: Annotated[
         str,
         typer.Option(
@@ -371,7 +354,8 @@ def generate(
             "--yes-tests",
             help=(
                 "Automatically confirm and generate all proposed test "
-                "suggestions without prompting."
+                "suggestions, and write their WEB_FEATURES.yml mappings, "
+                "without prompting."
             ),
         ),
     ] = False,
@@ -619,8 +603,6 @@ def generate(
     _print_workflow_banner(ui, feature_id)
     _check_workflow_flags(
         ui=ui,
-        wf_yml_update=wf_yml_update,
-        output_dir=output_dir,
         use_lightweight=use_lightweight,
         use_reasoning=use_reasoning,
         yes_cache=yes_cache,
@@ -684,13 +666,12 @@ def generate(
             run_on_browser_override=run_on_browser,
             run_on_channel_override=run_on_channel,
         )
+        config.map_web_features = wf_yml_update
 
         _execute_workflow(
             ui=ui,
             feature_id=feature_id,
             config=config,
-            wf_yml_update=wf_yml_update,
-            output_dir=output_dir,
             is_audit=False,
             disable_directory_inference=True,
         )
@@ -1603,13 +1584,6 @@ def audit(
             dir_okay=True,
         ),
     ] = None,
-    wf_yml_update: Annotated[
-        bool,
-        typer.Option(
-            "--wf-yml-update",
-            help="Update WEB_FEATURES.yml with generated tests.",
-        ),
-    ] = False,
     config_path: Annotated[
         str,
         typer.Option(
@@ -1859,8 +1833,6 @@ def audit(
     _print_workflow_banner(ui, feature_id)
     _check_workflow_flags(
         ui=ui,
-        wf_yml_update=wf_yml_update,
-        output_dir=output_dir,
         use_lightweight=use_lightweight,
         use_reasoning=use_reasoning,
         yes_cache=yes_cache,
@@ -1929,8 +1901,6 @@ def audit(
             ui=ui,
             feature_id=feature_id,
             config=config,
-            wf_yml_update=wf_yml_update,
-            output_dir=output_dir,
             is_audit=True,
         )
 

@@ -92,6 +92,8 @@ class Config:
     brief_suggestions: bool = False
     resume: bool = False
     skip_run: bool = False
+    # Phase 5: map generated tests in WEB_FEATURES.yml (--no-wf-yml-update).
+    map_web_features: bool = True
     max_retries: int = 3
     timeout: int = DEFAULT_LLM_TIMEOUT
     cache_path: str | None = None

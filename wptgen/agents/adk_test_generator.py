@@ -74,16 +74,36 @@ async def generate_test_with_adk(
     # We need to extract the paths from the agent's final tool call.
     generated_paths: list[str] = []
 
-    def report_generation_complete(file_paths: list[str]) -> dict[str, Any]:
+    def report_generation_complete(
+        file_paths: list[str],
+        feature_mappings: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """Tool to call ONLY when all test files are written to disk.
 
         Args:
             file_paths: A list of the absolute or relative file paths generated.
+            feature_mappings: For each test file (not references or helpers),
+                an object with `path`, `feature_ids` (the web feature IDs the
+                test covers, normally just the target feature) and `reason`
+                (why, if more than one).
 
         Returns:
             A dictionary confirming completion.
         """
         generated_paths.extend(file_paths)
+        for mapping in feature_mappings or []:
+            path = mapping.get("path")
+            ids = mapping.get("feature_ids")
+            if not isinstance(path, str) or not isinstance(ids, list):
+                continue
+            try:
+                key = str(_validate_safe_path(Path(path), wpt_root))
+            except ValueError:
+                continue
+            context.feature_mappings[key] = {
+                "feature_ids": [str(i) for i in ids],
+                "reason": str(mapping.get("reason") or ""),
+            }
         return {"status": "success", "message": "Generation recorded."}
 
     tools: list[Any] = list(

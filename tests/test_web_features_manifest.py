@@ -33,7 +33,9 @@ from wptgen.web_features_manifest import (
     WebFeaturesManifestError,
     WPTCheckout,
     _prune,
+    build_manifest_at,
     feature_test_paths,
+    features_for_paths,
     inspect_checkout,
     load_manifest_data,
     resolve_manifest,
@@ -424,3 +426,38 @@ def test_workflow_context_round_trips_manifest() -> None:
         WorkflowContext.from_dict({"feature_id": "x"}).web_features_manifest
         is None
     )
+
+
+def test_features_for_paths(tmp_path: Path) -> None:
+    manifest = tmp_path / "m.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "data": {
+                    "grid": ["/css/a.html", "/api/x.any.html"],
+                    "subgrid": [
+                        "/api/x.any.worker.html?v=1",
+                        "/w/y.window.html",
+                    ],
+                },
+            }
+        )
+    )
+    assert features_for_paths(
+        manifest, ["css/a.html", "api/x.any.js", "w/y.window.js", "none.html"]
+    ) == {
+        "css/a.html": ["grid"],
+        "api/x.any.js": ["grid", "subgrid"],
+        "w/y.window.js": ["subgrid"],
+        "none.html": [],
+    }
+
+
+def test_build_manifest_at_writes_uncached(
+    wpt_repo: Path, tmp_path: Path, build_log: Path
+) -> None:
+    dest = build_manifest_at(wpt_repo, tmp_path / "out" / "after.json")
+    assert dest.is_file()
+    assert load_manifest_data(dest) == BUILT_DATA
+    assert _build_count(build_log) == 1

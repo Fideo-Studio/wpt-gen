@@ -286,13 +286,27 @@ def test_generate_mutually_exclusive_requirements(
     assert msg in result.stdout
 
 
-def test_generate_wf_yml_update_validation() -> None:
-    """Test that --wf-yml-update without --output-dir exits with an error."""
-    result = runner.invoke(app, ["generate", "my-feature", "--wf-yml-update"])
-    assert result.exit_code == 1
-    assert (
-        "--output-dir is required when using --wf-yml-update" in result.stdout
-    )
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [([], True), (["--wf-yml-update"], True), (["--no-wf-yml-update"], False)],
+)
+def test_generate_wf_yml_update_flag(
+    args: list[str],
+    expected: bool,
+    mock_config: Config,
+    mock_load_config: Any,
+    mock_engine_instance: Any,
+) -> None:
+    """Mapping is on by default, needs no --output-dir, and can be turned off."""
+    result = runner.invoke(app, ["generate", "my-feature", *args])
+    assert result.exit_code == 0, result.stdout
+    assert mock_config.map_web_features is expected
+
+
+def test_audit_has_no_wf_yml_update_flag() -> None:
+    """Audit never generates tests, so it has nothing to map."""
+    result = runner.invoke(app, ["audit", "my-feature", "--wf-yml-update"])
+    assert result.exit_code != 0
 
 
 def test_doctor_command_success(
