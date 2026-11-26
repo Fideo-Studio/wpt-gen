@@ -252,6 +252,10 @@ class WPTGenEngine:
             ]
             with open(tests_json, "w", encoding="utf-8") as f:
                 json.dump(tests_data, f, indent=2)
+            with open(
+                state_dir / "agent_usage.json", "w", encoding="utf-8"
+            ) as f:
+                json.dump(context.agent_usage, f, indent=2)
 
     async def _run_async_workflow(
         self, feature_id: str, disable_directory_inference: bool = False

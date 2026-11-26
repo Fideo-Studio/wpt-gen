@@ -413,5 +413,16 @@ async def _generate_adk_loop(
     ui.report_generation_summary(
         final_results, context.run_records, context.unreported_suggestions
     )
+    if context.agent_usage:
+        agents = context.agent_usage
+        minutes = sum(agent["seconds"] for agent in agents) / 60
+        model_calls = sum(agent["model_calls"] for agent in agents)
+        tool_calls = sum(agent["tool_calls"] for agent in agents)
+        tokens = sum(agent["total_tokens"] for agent in agents)
+        ui.info(
+            f"{len(agents)} generator agents took {minutes:.1f} min: "
+            f"{model_calls} model calls, {tool_calls} tool calls, "
+            f"{tokens:,} tokens."
+        )
 
     return final_results

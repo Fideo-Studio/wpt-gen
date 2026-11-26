@@ -171,6 +171,9 @@ async def test_generate_test_with_adk(
             "reason": "needs other to observe it",
         }
     }
+    [usage] = context.agent_usage
+    assert usage["files"] == ["my-feature-1.html"]
+    assert (usage["model_calls"], usage["test_runs"]) == (1, 0)
     msg = (
         "wpt-generator skill directory not found. Agent will generate tests "
         "without skill guidance."

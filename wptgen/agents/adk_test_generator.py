@@ -15,6 +15,7 @@
 """Agentic test generation using the Google ADK framework."""
 
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,7 @@ from wptgen.config import SKILLS_DIR, Config
 from wptgen.metadata import WebFeaturesYmlError, classify_test_files
 from wptgen.models import TestType, WorkflowContext
 from wptgen.ui import UIProvider
+from wptgen.utils import extract_xml_tag
 
 
 async def generate_test_with_adk(
@@ -224,11 +226,20 @@ async def generate_test_with_adk(
         )
 
         # We just consume the stream to let the agent run.
+        start = time.monotonic()
+        model_calls = tool_calls = 0
         with ADKStreamManager(
             ui, config=StreamConfig(include_thoughts=config.include_thoughts)
         ) as stream_manager:
             async for event in events:
                 stream_manager.process_event(event)
+                if getattr(event, "usage_metadata", None) is not None:
+                    model_calls += 1
+                parts = event.content.parts if event.content else None
+                tool_calls += sum(
+                    1 for part in parts or [] if part.function_call
+                )
+        agent_seconds = time.monotonic() - start
 
         results = []
         if not generated_paths:
@@ -249,6 +260,7 @@ async def generate_test_with_adk(
                     f"Failed to read securely generated file '{path_str}': {e}"
                 )
 
+        start = time.monotonic()
         _record_final_runs(
             [path for path, _, _ in results],
             run_log,
@@ -257,6 +269,24 @@ async def generate_test_with_adk(
             config,
             wpt_root,
             ui,
+        )
+        usage = stream_manager.token_usage
+        context.agent_usage.append(
+            {
+                "suggestion": extract_xml_tag(suggestion_xml, "description"),
+                "files": [path.name for path, _, _ in results],
+                "seconds": round(agent_seconds, 1),
+                "model_calls": model_calls,
+                "tool_calls": tool_calls,
+                "prompt_tokens": usage.prompt_tokens,
+                "output_tokens": usage.candidates_tokens,
+                "total_tokens": usage.total_tokens,
+                "test_runs": len(run_log.runs),
+                "test_run_seconds": round(
+                    sum(run.get("duration") or 0 for run in run_log.runs), 1
+                ),
+                "final_run_seconds": round(time.monotonic() - start, 1),
+            }
         )
         return results
 

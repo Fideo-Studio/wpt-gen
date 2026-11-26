@@ -413,6 +413,9 @@ def create_agent_tools(
     Returns:
         A list of ADK `FunctionTool` objects.
     """
+    # Tools compare resolved paths against the root, so it must be absolute
+    # even when the config gives a relative `wpt_path`.
+    wpt_path = wpt_path.resolve()
     if run_log is None:
         run_log = RunLog()
 

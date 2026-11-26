@@ -495,6 +495,28 @@ def test_agent_tools_run_wpt_test_records_runs(
     assert run_log.changes == 1
 
 
+def test_agent_tools_with_relative_wpt_path(
+    tmp_path: Path, mocker: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relative root, as `wpt_path: ../wpt` in wpt-gen.yml gives, works."""
+    (tmp_path / "wpt").mkdir()
+    (tmp_path / "wpt" / "test.html").touch()
+    (tmp_path / "repo").mkdir()
+    monkeypatch.chdir(tmp_path / "repo")
+    tools = {
+        t.name: t
+        for t in create_agent_tools(
+            Path("../wpt"), MagicMock(spec=UIProvider), "chrome", "canary"
+        )
+    }
+    mock_run = mocker.patch("wptgen.agents.tools.subprocess.run")
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+    assert tools["run_wpt_lint"].func("test.html")["status"] == "success"
+    assert tools["list_directory"].func(".")["status"] == "success"
+    assert mock_run.call_args.args[0][-1] == "./test.html"
+
+
 def test_agent_tools_search_feature_tests(tmp_path: Path, mocker: Any) -> None:
     wpt_root = tmp_path / "wpt"
     wpt_root.mkdir()

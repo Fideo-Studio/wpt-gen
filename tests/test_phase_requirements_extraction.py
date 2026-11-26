@@ -351,6 +351,56 @@ async def test_run_requirements_extraction_categorized(
 
 
 @pytest.mark.asyncio
+async def test_run_requirements_extraction_categorized_drops_repeats(
+    mock_config: Config,
+    mock_ui: MagicMock,
+    mock_llm: MagicMock,
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    """A requirement whose spec quote another category already gave is
+    dropped, and the rest are numbered without a gap."""
+    context = WorkflowContext(
+        feature_id="feat",
+        metadata=FeatureMetadata("Feat", "Desc", ["http://spec"]),
+        spec_contents={"http://spec": "Spec"},
+    )
+    jinja_env = MagicMock()
+    jinja_env.get_template.return_value.render.return_value = "Mock Template"
+
+    def requirement(category: str, description: str, quote: str) -> str:
+        return (
+            f'<requirements_list><requirement id="R1"><category>{category}'
+            f"</category><description>{description}</description>"
+            f"<spec_quote>{quote}</spec_quote></requirement>"
+            "</requirements_list>"
+        )
+
+    mocker.patch(
+        "wptgen.phases.requirements_extraction.generate_safe",
+        side_effect=[
+            requirement("Existence", "D1", "It MUST exist."),
+            requirement("Common Use Cases", "D2", "It MUST  stop."),
+            requirement("Error Scenarios", "D3", "It MUST throw."),
+            requirement("Invalidation", "D4", "It MUST\nstop."),
+            requirement("Integration", "D5", ""),
+        ],
+    )
+    res = await run_requirements_extraction_categorized(
+        context, mock_config, mock_llm, mock_ui, jinja_env, tmp_path
+    )
+
+    assert res is not None
+    assert "D4" not in res
+    assert res.count("<requirement id=") == 4
+    assert '<requirement id="R4"><category>Integration' in res
+    mock_ui.info.assert_any_call(
+        "Dropped a requirement from Invalidation that repeats R2 (same spec "
+        "quote)."
+    )
+
+
+@pytest.mark.asyncio
 async def test_run_requirements_extraction_categorized_partial_empty(
     mock_config: Config,
     mock_ui: MagicMock,

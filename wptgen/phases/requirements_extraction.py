@@ -36,6 +36,7 @@ from wptgen.phases.utils import (
     load_cached_requirements,
 )
 from wptgen.ui import UIProvider
+from wptgen.utils import extract_xml_tag
 
 # Kept for backwards compatibility with any external callers; new code
 # should use `load_cached_requirements` from the shared module directly.
@@ -291,6 +292,9 @@ async def run_requirements_extraction_categorized(
 
         all_requirements: list[str] = []
         requirement_counter = 1
+        # Categories are extracted separately, so the same rule can come back
+        # under two of them. A repeated spec quote marks a repeat.
+        ids_by_quote: dict[str, str] = {}
 
         for (name, _), response in zip(
             REQUIREMENT_CATEGORIES, responses, strict=True
@@ -316,6 +320,17 @@ async def run_requirements_extraction_categorized(
                 continue
 
             for req in new_reqs:
+                quote = " ".join(
+                    (extract_xml_tag(req, "spec_quote") or "").split()
+                )
+                if quote in ids_by_quote:
+                    ui.info(
+                        f"Dropped a requirement from {name} that repeats "
+                        f"{ids_by_quote[quote]} (same spec quote)."
+                    )
+                    continue
+                if quote:
+                    ids_by_quote[quote] = f"R{requirement_counter}"
                 # Re-index requirements as they come out
                 re_indexed = re.sub(
                     r'(<requirement[^>]*?)id="[^"]+"',

@@ -205,6 +205,8 @@ class WorkflowContext:
     run_records: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Descriptions of suggestions whose agent never reported its files.
     unreported_suggestions: list[str] = field(default_factory=list)
+    # Per generator agent: time, model and tool calls, tokens and test runs.
+    agent_usage: list[dict[str, Any]] = field(default_factory=list)
     wpt_urls: list[str] | None = None
     markdown_report: str | None = None
     # Manifest and checkout state captured at the start of the run.
@@ -233,6 +235,7 @@ class WorkflowContext:
             "feature_mappings": self.feature_mappings,
             "run_records": self.run_records,
             "unreported_suggestions": self.unreported_suggestions,
+            "agent_usage": self.agent_usage,
             "wpt_urls": self.wpt_urls,
             "markdown_report": self.markdown_report,
             "web_features_manifest": (
@@ -285,6 +288,7 @@ class WorkflowContext:
             feature_mappings=data.get("feature_mappings") or {},
             run_records=data.get("run_records") or {},
             unreported_suggestions=data.get("unreported_suggestions") or [],
+            agent_usage=data.get("agent_usage") or [],
             wpt_urls=data.get("wpt_urls"),
             markdown_report=data.get("markdown_report"),
             web_features_manifest=(
