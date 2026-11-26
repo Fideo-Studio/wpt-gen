@@ -232,6 +232,34 @@ def test_report_generation_summary(
     assert mock_console.print.call_count == 5
 
 
+def test_report_generation_summary_needs_review(
+    ui: RichUIProvider, mock_console: MagicMock
+) -> None:
+    """Flagged runs and silent agents are listed with the agent's reasons."""
+    ui.report_generation_summary(
+        [(Path("/wpt/a.html"), "c", "s"), (Path("/wpt/b.html"), "c", "s")],
+        {
+            "/wpt/a.html": {"final": {"status": "pass"}, "known_failures": []},
+            "/wpt/b.html": {
+                "final": {"status": "fail"},
+                "known_failures": [{"subtest": "s1", "reason": "no support"}],
+            },
+        },
+        ["D2"],
+    )
+    printed = [
+        str(c.args[0]) for c in mock_console.print.call_args_list if c.args
+    ]
+    assert (
+        "  - b.html: assertions failed; the agent says these are browser "
+        "bugs: s1 (no support)"
+    ) in printed
+    assert "  - No files reported for the suggestion: D2" in printed
+    assert not any(
+        "a.html" in line for line in printed if line.startswith("  -")
+    )
+
+
 def test_report_findings_summary(
     ui: RichUIProvider, mock_console: MagicMock
 ) -> None:

@@ -50,6 +50,8 @@ After generation, `wpt-gen` maps each new test to the features the generator dec
 | `--yes-cache` | Automatically use the cache if it exists without prompting. |
 | `--no-cache` | Automatically ignore and overwrite the cache if it exists without prompting. |
 | `--max-parallel-requests` | Limit the number of concurrent asynchronous LLM requests. |
+| `--skip-run` | Don't run generated tests in the local browser. |
+| `--fail-on-flagged` | Exit with an error if any generated test fails its final local run, or an agent ends without reporting its files. See [Phase 4](workflow-phases.md#phase-4-test-generation-generationpy). |
 | `--rebuild-manifest` | Build WPT's web-features manifest again instead of using the cached one for the checkout's current state. Not affected by `--no-cache`. |
 
 #### Model Configuration

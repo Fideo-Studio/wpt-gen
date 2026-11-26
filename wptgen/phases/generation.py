@@ -386,7 +386,9 @@ async def _generate_adk_loop(
     # output corruption.
     ui.print("\n[bold cyan]Starting ADK Test Generation...[/bold cyan]")
 
-    for i, task in enumerate(tasks):
+    for i, (task, suggestion_xml) in enumerate(
+        zip(tasks, approved_suggestions_xml, strict=True)
+    ):
         msg = f"\n[bold yellow]--- Generating Test {i+1} of {len(tasks)} ---"
         ui.print(f"{msg}[/bold yellow]")
         ui.print(
@@ -400,9 +402,16 @@ async def _generate_adk_loop(
         ui.print()
         ui.print(Rule(style="cyan"))
         results.append(result)
+        if not result:
+            context.unreported_suggestions.append(
+                extract_xml_tag(suggestion_xml, "description")
+                or f"Suggestion #{i + 1}"
+            )
 
     final_results = [r for sublist in results for r in sublist]
 
-    ui.report_generation_summary(final_results)
+    ui.report_generation_summary(
+        final_results, context.run_records, context.unreported_suggestions
+    )
 
     return final_results

@@ -177,6 +177,12 @@ class WPTContext:
         return cls(**data)
 
 
+# Final local run statuses that flag a generated test for review: `fail` is
+# an assertion failure (a test bug or a browser bug), `error` a harness error,
+# timeout or crash (usually a test bug).
+FLAGGED_RUN_STATUSES = ("fail", "error")
+
+
 @dataclass
 class WorkflowContext:
     """Maintains the state of the WPT generation workflow."""
@@ -194,6 +200,11 @@ class WorkflowContext:
     generated_tests: list[tuple[Path, str, str]] | None = None
     # Feature IDs the generator declared per test path, with its reason.
     feature_mappings: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Each generated test's final local run, its agent runs and the failures
+    # the agent believes are browser bugs, per test path.
+    run_records: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Descriptions of suggestions whose agent never reported its files.
+    unreported_suggestions: list[str] = field(default_factory=list)
     wpt_urls: list[str] | None = None
     markdown_report: str | None = None
     # Manifest and checkout state captured at the start of the run.
@@ -220,6 +231,8 @@ class WorkflowContext:
                 else None
             ),
             "feature_mappings": self.feature_mappings,
+            "run_records": self.run_records,
+            "unreported_suggestions": self.unreported_suggestions,
             "wpt_urls": self.wpt_urls,
             "markdown_report": self.markdown_report,
             "web_features_manifest": (
@@ -270,6 +283,8 @@ class WorkflowContext:
             mdn_contents=data.get("mdn_contents"),
             generated_tests=generated_tests,
             feature_mappings=data.get("feature_mappings") or {},
+            run_records=data.get("run_records") or {},
+            unreported_suggestions=data.get("unreported_suggestions") or [],
             wpt_urls=data.get("wpt_urls"),
             markdown_report=data.get("markdown_report"),
             web_features_manifest=(

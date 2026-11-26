@@ -25,6 +25,7 @@ import pytest
 
 from wptgen.agents.provider import setup_adk_environment
 from wptgen.agents.tools import (
+    RunLog,
     _parse_test_results,
     _validate_safe_path,
     create_agent_tools,
@@ -442,6 +443,56 @@ def test_agent_tools_run_wpt_test(tmp_path: Path, mocker: Any) -> None:
     mock_run.side_effect = OSError("failed run")
     result = tool.func(str(test_file))
     assert result["status"] == "error"
+
+
+def test_agent_tools_run_wpt_test_records_runs(
+    tmp_path: Path, mocker: Any
+) -> None:
+    """Each run is logged with its attempt, results and the edit count."""
+    wpt_root = tmp_path / "wpt"
+    wpt_root.mkdir()
+    test_file = wpt_root / "test.html"
+    test_file.touch()
+    run_log = RunLog()
+    tools = {
+        t.name: t
+        for t in create_agent_tools(
+            wpt_root,
+            MagicMock(spec=UIProvider),
+            "chrome",
+            "canary",
+            run_log=run_log,
+        )
+    }
+
+    def fake_run(cmd: list[str], **_: Any) -> MagicMock:
+        events = [
+            {"action": "suite_start", "run_info": {"browser_version": "150"}},
+            {
+                "action": "test_status",
+                "test": "/test.html",
+                "subtest": "s1",
+                "status": "FAIL",
+                "message": "assert_equals",
+            },
+            {"action": "test_end", "test": "/test.html", "status": "OK"},
+        ]
+        log = Path(cmd[cmd.index("--log-raw") + 1])
+        log.write_text("\n".join(json.dumps(e) for e in events))
+        return MagicMock(returncode=1, stdout="", stderr="")
+
+    mocker.patch("wptgen.agents.tools.subprocess.run", side_effect=fake_run)
+    tools["run_wpt_test"].func(str(test_file))
+    tools["write_file"].func(str(test_file), "<!DOCTYPE html>")
+    tools["run_wpt_test"].func(str(test_file))
+
+    first, second = run_log.runs
+    assert first["status"] == "fail"
+    assert first["browser_version"] == "150"
+    assert first["results"][0]["subtests"][0]["name"] == "s1"
+    assert (first["attempt"], first["changes"]) == (1, 0)
+    assert (second["attempt"], second["changes"]) == (2, 1)
+    assert run_log.changes == 1
 
 
 def test_agent_tools_search_feature_tests(tmp_path: Path, mocker: Any) -> None:

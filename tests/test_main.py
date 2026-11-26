@@ -303,6 +303,17 @@ def test_generate_wf_yml_update_flag(
     assert mock_config.map_web_features is expected
 
 
+def test_generate_fail_on_flagged_flag(
+    mock_config: Config, mock_load_config: Any, mock_engine_instance: Any
+) -> None:
+    """--fail-on-flagged is off by default."""
+    runner.invoke(app, ["generate", "my-feature"])
+    assert mock_config.fail_on_flagged is False
+    result = runner.invoke(app, ["generate", "my-feature", "--fail-on-flagged"])
+    assert result.exit_code == 0, result.stdout
+    assert mock_config.fail_on_flagged is True
+
+
 def test_audit_has_no_wf_yml_update_flag() -> None:
     """Audit never generates tests, so it has nothing to map."""
     result = runner.invoke(app, ["audit", "my-feature", "--wf-yml-update"])

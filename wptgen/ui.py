@@ -32,10 +32,51 @@ from rich.prompt import Confirm
 from rich.syntax import Syntax
 from rich.table import Table
 
+from wptgen.models import FLAGGED_RUN_STATUSES
 from wptgen.utils import parse_multi_file_response
 
 if TYPE_CHECKING:
     from wptgen.models import FeatureMetadata
+
+
+def _run_label(final: dict[str, Any]) -> str:
+    """Describes a generated test's final local run."""
+    status = final.get("status")
+    if status == "pass":
+        return "passed"
+    if status == "fail":
+        return "assertions failed"
+    if status == "error":
+        return "harness error"
+    reason = final.get("reason", "")
+    return f"not run ({reason})"
+
+
+def _needs_review(
+    run_records: dict[str, dict[str, Any]], unreported_suggestions: list[str]
+) -> list[str]:
+    """Lists generated tests flagged by their final run, with the agent's
+    stated reasons, and suggestions whose agent never reported its files."""
+    lines = []
+    for path, record in run_records.items():
+        final = record["final"]
+        if final.get("status") not in FLAGGED_RUN_STATUSES:
+            continue
+        line = f"{Path(path).name}: {_run_label(final)}"
+        reasons = []
+        for failure in record["known_failures"]:
+            subtest, reason = failure["subtest"], failure["reason"]
+            reasons.append(f"{subtest} ({reason})")
+        if reasons:
+            line += "; the agent says these are browser bugs: " + "; ".join(
+                reasons
+            )
+        lines.append(line)
+    for description in unreported_suggestions:
+        lines.append(
+            f"No files reported for the suggestion: {description[:80]}"
+        )
+    return lines
 
 
 class ProgressIndicator(Protocol):
@@ -141,7 +182,10 @@ class UIProvider(Protocol):
     ) -> None: ...
 
     def report_generation_summary(
-        self, generated_tests: list[tuple[Path, str, str]]
+        self,
+        generated_tests: list[tuple[Path, str, str]],
+        run_records: dict[str, dict[str, Any]] | None = None,
+        unreported_suggestions: list[str] | None = None,
     ) -> None: ...
 
     def report_findings_summary(
@@ -513,9 +557,14 @@ class RichUIProvider:
             self.error(f"Failed to generate: {root_name}")
 
     def report_generation_summary(
-        self, generated_tests: list[tuple[Path, str, str]]
+        self,
+        generated_tests: list[tuple[Path, str, str]],
+        run_records: dict[str, dict[str, Any]] | None = None,
+        unreported_suggestions: list[str] | None = None,
     ) -> None:
-        """Displays a summary table of all generated tests and support files."""
+        """Displays a summary table of all generated tests and support files,
+        each test's final local run, and what needs review."""
+        run_records = run_records or {}
         if generated_tests:
             summary_table = Table(
                 title="Generated Files Summary",
@@ -525,6 +574,7 @@ class RichUIProvider:
             summary_table.add_column("File Name", style="cyan")
             summary_table.add_column("Full Path", style="dim")
             summary_table.add_column("Type", style="magenta")
+            summary_table.add_column("Local Run")
 
             breakdown: dict[str, int] = {}
             for p, _content, _s_xml in generated_tests:
@@ -539,7 +589,13 @@ class RichUIProvider:
                     file_type = "Support File"
 
                 breakdown[file_type] = breakdown.get(file_type, 0) + 1
-                summary_table.add_row(p.name, str(p.absolute()), file_type)
+                record = run_records.get(str(p))
+                summary_table.add_row(
+                    p.name,
+                    str(p.absolute()),
+                    file_type,
+                    _run_label(record["final"]) if record else "",
+                )
 
             self.console.print()
             self.console.print(summary_table)
@@ -553,6 +609,12 @@ class RichUIProvider:
             )
         else:
             self.error("No files were successfully created.")
+
+        review = _needs_review(run_records, unreported_suggestions or [])
+        if review:
+            self.console.print("[bold yellow]Needs review:[/bold yellow]")
+            for line in review:
+                self.console.print(f"  - {line}")
 
     def report_findings_summary(
         self,
@@ -820,10 +882,17 @@ class LoggingUIProvider:
             logger.error(f"FAILED: Test generation failed for {root_name}")
 
     def report_generation_summary(
-        self, generated_tests: list[tuple[Path, str, str]]
+        self,
+        generated_tests: list[tuple[Path, str, str]],
+        run_records: dict[str, dict[str, Any]] | None = None,
+        unreported_suggestions: list[str] | None = None,
     ) -> None:
-        """Displays a summary table of all generated tests."""
+        """Logs the number of generated files and what needs review."""
         logger.info(f"Generated {len(generated_tests)} tests.")
+        for line in _needs_review(
+            run_records or {}, unreported_suggestions or []
+        ):
+            logger.warning(f"Needs review: {line}")
 
     def report_findings_summary(
         self,

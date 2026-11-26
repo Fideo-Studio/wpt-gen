@@ -327,6 +327,16 @@ def generate(
             ),
         ),
     ] = True,
+    fail_on_flagged: Annotated[
+        bool,
+        typer.Option(
+            "--fail-on-flagged",
+            help=(
+                "Exit with an error if any generated test fails its final "
+                "local run, or an agent ends without reporting its files."
+            ),
+        ),
+    ] = False,
     config_path: Annotated[
         str,
         typer.Option(
@@ -667,6 +677,7 @@ def generate(
             run_on_channel_override=run_on_channel,
         )
         config.map_web_features = wf_yml_update
+        config.fail_on_flagged = fail_on_flagged
 
         _execute_workflow(
             ui=ui,

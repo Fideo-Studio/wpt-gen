@@ -20,13 +20,27 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from pytest_mock import MockerFixture
 
 pytest.importorskip("google.adk")
 
-from wptgen.agents.adk_test_generator import generate_test_with_adk
+from wptgen.agents.adk_test_generator import (
+    _record_final_runs,
+    generate_test_with_adk,
+)
+from wptgen.agents.tools import RunLog
 from wptgen.config import Config
 from wptgen.models import TestType as WPTTestType
 from wptgen.models import WorkflowContext
+
+
+@pytest.fixture(autouse=True)
+def mock_classify(mocker: MockerFixture) -> MagicMock:
+    """Stand in for WPT's SourceFile, which needs a real checkout."""
+    return mocker.patch(
+        "wptgen.agents.adk_test_generator.classify_test_files",
+        return_value={},
+    )
 
 
 @pytest.fixture
@@ -438,3 +452,60 @@ async def test_generate_test_with_openai_provider(
     # Assert that the 'openai/' prefix was added to the model string
     agent = mock_runner_cls.call_args.kwargs["agent"]
     assert agent.model == "openai/gpt-4o"
+
+
+def test_record_final_runs(
+    tmp_path: Path, mocker: MagicMock, mock_classify: MagicMock
+) -> None:
+    """The agent's last run is reused unless a file changed after it."""
+    paths = [
+        tmp_path / name for name in ("a.html", "b.html", "m.html", "r.html")
+    ]
+    mock_classify.return_value = {
+        "a.html": "testharness",
+        "b.html": "testharness",
+        "m.html": "manual",
+        "r.html": "support",
+    }
+    run_log = RunLog(
+        runs=[
+            {"path": "a.html", "attempt": 1, "status": "fail", "changes": 0},
+            {"path": "a.html", "attempt": 2, "status": "pass", "changes": 1},
+            {"path": "b.html", "attempt": 1, "status": "pass", "changes": 0},
+        ],
+        changes=1,
+    )
+    harness_run = mocker.patch(
+        "wptgen.agents.adk_test_generator.run_test_file",
+        return_value=({}, {"path": "b.html", "status": "fail"}),
+    )
+    context = WorkflowContext()
+    config = MagicMock(skip_run=False)
+
+    _record_final_runs(
+        paths,
+        run_log,
+        [{"path": "b.html", "subtest": "s1", "reason": "browser bug"}],
+        context,
+        config,
+        tmp_path,
+        MagicMock(),
+    )
+
+    records = {Path(p).name: r for p, r in context.run_records.items()}
+    assert records["a.html"]["final"]["started_by"] == "agent"
+    assert [r["status"] for r in records["a.html"]["agent_runs"]] == [
+        "fail",
+        "pass",
+    ]
+    assert records["b.html"]["final"] == {
+        "path": "b.html",
+        "status": "fail",
+        "started_by": "harness",
+    }
+    assert records["b.html"]["known_failures"] == [
+        {"subtest": "s1", "reason": "browser bug"}
+    ]
+    assert records["m.html"]["final"]["status"] == "not_run"
+    assert "r.html" not in records
+    harness_run.assert_called_once()

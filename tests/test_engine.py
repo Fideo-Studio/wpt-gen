@@ -741,3 +741,39 @@ async def test_phase_5_failure_keeps_resume_state(
         await engine._run_async_workflow("feat-id")
 
     assert engine._get_resume_file_path("feat-id").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_on_flagged", [False, True])
+async def test_fail_on_flagged(
+    engine: WPTGenEngine, mocker: MockerFixture, fail_on_flagged: bool
+) -> None:
+    """--fail-on-flagged turns a failed final run or a silent agent into an
+    error, after mapping has run."""
+    engine.config.fail_on_flagged = fail_on_flagged
+    context = WorkflowContext(
+        feature_id="feat-id",
+        run_records={
+            "/wpt/a.html": {"final": {"status": "pass"}},
+            "/wpt/b.html": {"final": {"status": "fail"}},
+        },
+        unreported_suggestions=["D2"],
+    )
+    mocker.patch("wptgen.engine.run_context_assembly", return_value=context)
+    mocker.patch(
+        "wptgen.engine.run_requirements_extraction_categorized",
+        return_value="reqs",
+    )
+    mocker.patch("wptgen.engine.run_coverage_audit", return_value="audit")
+    mocker.patch(
+        "wptgen.engine.run_test_generation",
+        return_value=[("t.html", "c", "s")],
+    )
+    mapping = mocker.patch("wptgen.engine.run_web_features_mapping")
+
+    if fail_on_flagged:
+        with pytest.raises(WorkflowError, match="2 generated .*: b.html, D2"):
+            await engine._run_async_workflow("feat-id")
+    else:
+        await engine._run_async_workflow("feat-id")
+    mapping.assert_called_once()

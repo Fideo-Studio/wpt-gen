@@ -94,6 +94,7 @@ class Config:
     skip_run: bool = False
     # Phase 5: map generated tests in WEB_FEATURES.yml (--no-wf-yml-update).
     map_web_features: bool = True
+    fail_on_flagged: bool = False
     max_retries: int = 3
     timeout: int = DEFAULT_LLM_TIMEOUT
     cache_path: str | None = None

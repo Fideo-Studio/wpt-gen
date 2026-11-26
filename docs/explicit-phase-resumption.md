@@ -14,7 +14,7 @@ As WPT-Gen completes each major phase, it automatically serializes the structure
 
 1. **`requirements.json`**: Saved after Phase 2 (Requirements Extraction). Contains the extracted technical requirements from the specification.
 2. **`test_suggestions.json`**: Saved after Phase 3 (Coverage Audit). Contains the gap analysis and proposed test suggestions.
-3. **`generated_tests.json`**: Saved after Phase 4 (Test Generation). Contains the raw generated test code and file paths.
+3. **`generated_tests.json`**: Saved after Phase 4 (Test Generation). Contains the raw generated test code and file paths, and each test's final local run.
 
 These artifacts act as the "memory" of the workflow, allowing `wpt-gen` to seamlessly pick up where it left off.
 

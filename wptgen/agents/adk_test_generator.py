@@ -29,8 +29,14 @@ from jinja2 import Environment
 
 from wptgen.agents.provider import create_adk_model, setup_adk_environment
 from wptgen.agents.streaming import ADKStreamManager, StreamConfig
-from wptgen.agents.tools import _validate_safe_path, create_agent_tools
+from wptgen.agents.tools import (
+    RunLog,
+    _validate_safe_path,
+    create_agent_tools,
+    run_test_file,
+)
 from wptgen.config import SKILLS_DIR, Config
+from wptgen.metadata import WebFeaturesYmlError, classify_test_files
 from wptgen.models import TestType, WorkflowContext
 from wptgen.ui import UIProvider
 
@@ -73,10 +79,13 @@ async def generate_test_with_adk(
 
     # We need to extract the paths from the agent's final tool call.
     generated_paths: list[str] = []
+    reported_failures: list[dict[str, Any]] = []
+    run_log = RunLog()
 
     def report_generation_complete(
         file_paths: list[str],
         feature_mappings: list[dict[str, Any]] | None = None,
+        known_failures: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Tool to call ONLY when all test files are written to disk.
 
@@ -86,11 +95,15 @@ async def generate_test_with_adk(
                 an object with `path`, `feature_ids` (the web feature IDs the
                 test covers, normally just the target feature) and `reason`
                 (why, if more than one).
+            known_failures: For each subtest that still fails and that you
+                believe fails because of a browser bug rather than the test,
+                an object with `path`, `subtest` and `reason`.
 
         Returns:
             A dictionary confirming completion.
         """
         generated_paths.extend(file_paths)
+        reported_failures.extend(known_failures or [])
         for mapping in feature_mappings or []:
             path = mapping.get("path")
             ids = mapping.get("feature_ids")
@@ -119,6 +132,7 @@ async def generate_test_with_adk(
                 if context.web_features_manifest
                 else None
             ),
+            run_log=run_log,
         )
     )
     tools.append(FunctionTool(func=report_generation_complete))
@@ -235,6 +249,15 @@ async def generate_test_with_adk(
                     f"Failed to read securely generated file '{path_str}': {e}"
                 )
 
+        _record_final_runs(
+            [path for path, _, _ in results],
+            run_log,
+            reported_failures,
+            context,
+            config,
+            wpt_root,
+            ui,
+        )
         return results
 
     finally:
@@ -242,3 +265,87 @@ async def generate_test_with_adk(
         await session_service.delete_session(
             app_name="wpt-gen", user_id="cli_user", session_id=session.id
         )
+
+
+def _record_final_runs(
+    paths: list[Path],
+    run_log: RunLog,
+    reported_failures: list[dict[str, Any]],
+    context: WorkflowContext,
+    config: Config,
+    wpt_root: Path,
+    ui: UIProvider,
+) -> None:
+    """Records each generated test's final local run in `context.run_records`.
+
+    The agent's last run of a test is reused if no file changed after it;
+    otherwise the harness runs the test once more. Manual tests, and every
+    test under `--skip-run`, are recorded as not run.
+    """
+    root = wpt_root.resolve()
+    rel_paths = [path.resolve().relative_to(root).as_posix() for path in paths]
+    try:
+        test_types = classify_test_files(root, rel_paths)
+    except WebFeaturesYmlError as e:
+        ui.warning(f"Generated tests weren't given a final run: {e}")
+        return
+    for path, rel_path in zip(paths, rel_paths, strict=True):
+        test_type = test_types.get(rel_path, "support")
+        if test_type == "support":
+            continue
+        agent_runs = [run for run in run_log.runs if run["path"] == rel_path]
+        final: dict[str, Any]
+        if test_type == "manual" or config.skip_run:
+            reason = "manual test" if test_type == "manual" else "--skip-run"
+            final = {"path": rel_path, "status": "not_run", "reason": reason}
+        elif agent_runs and agent_runs[-1]["changes"] == run_log.changes:
+            final = {**agent_runs[-1], "started_by": "agent"}
+        else:
+            ui.info(f"Running {rel_path} once more for its run record...")
+            _, final = run_test_file(
+                root, rel_path, config.run_on_browser, config.run_on_channel, ui
+            )
+            final["started_by"] = "harness"
+        failures = []
+        for failure in reported_failures:
+            try:
+                failure_path = _validate_safe_path(
+                    Path(str(failure.get("path"))), wpt_root
+                )
+            except ValueError:
+                continue
+            if failure_path.resolve() == path.resolve():
+                failures.append(
+                    {
+                        "subtest": str(failure.get("subtest") or ""),
+                        "reason": str(failure.get("reason") or ""),
+                    }
+                )
+        context.run_records[str(path)] = {
+            "type": test_type,
+            "final": final,
+            "agent_runs": [
+                {
+                    "attempt": run["attempt"],
+                    "status": run["status"],
+                    "failing": _failing_subtests(run),
+                    "duration": run.get("duration"),
+                }
+                for run in agent_runs
+            ],
+            "known_failures": failures,
+        }
+
+
+def _failing_subtests(run: dict[str, Any]) -> list[str]:
+    """Names each failing test or subtest in a run record."""
+    failing = []
+    for result in run.get("results", []):
+        test, status = result["test"], result["status"]
+        if status not in ("OK", "PASS"):
+            failing.append(f"{test}: {status}")
+        for subtest in result["subtests"]:
+            name, status = subtest["name"], subtest["status"]
+            if status != "PASS":
+                failing.append(f"{name}: {status}")
+    return failing

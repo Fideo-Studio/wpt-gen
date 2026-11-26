@@ -22,7 +22,12 @@ from jinja2 import Environment, FileSystemLoader
 
 from wptgen.config import TEMPLATE_DIR, Config
 from wptgen.llm import get_llm_client
-from wptgen.models import WorkflowContext, WorkflowError, WorkflowPhase
+from wptgen.models import (
+    FLAGGED_RUN_STATUSES,
+    WorkflowContext,
+    WorkflowError,
+    WorkflowPhase,
+)
 from wptgen.phases.context_assembly import run_context_assembly
 from wptgen.phases.coverage_audit import (
     provide_coverage_report,
@@ -241,6 +246,7 @@ class WPTGenEngine:
                     "suggestion": s,
                     "spec_quote": extract_xml_tag(s, "spec_quote"),
                     "feature_mapping": context.feature_mappings.get(str(p)),
+                    "run": context.run_records.get(str(p)),
                 }
                 for p, c, s in context.generated_tests
             ]
@@ -428,5 +434,18 @@ class WPTGenEngine:
 
         # Final cleanup of resume file on success
         self._get_resume_file_path(feature_id).unlink(missing_ok=True)
+
+        if self.config.fail_on_flagged:
+            flagged = [
+                Path(path).name
+                for path, record in context.run_records.items()
+                if record["final"]["status"] in FLAGGED_RUN_STATUSES
+            ]
+            flagged += context.unreported_suggestions
+            if flagged:
+                raise WorkflowError(
+                    f"{len(flagged)} generated test(s) or suggestion(s) need "
+                    "review: " + ", ".join(flagged)
+                )
 
         return context

@@ -21,6 +21,7 @@ import re
 import subprocess
 import tempfile
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -182,6 +183,203 @@ def _validate_safe_path(target_path: Path, wpt_root: Path) -> Path:
     return resolved_target
 
 
+@dataclass
+class RunLog:
+    """The test runs started through `run_wpt_test`.
+
+    `changes` counts the file changes made through the tools so far, and each
+    run records the count when it started, so a run is known to match the
+    files on disk if nothing changed after it.
+    """
+
+    runs: list[dict[str, Any]] = field(default_factory=list)
+    changes: int = 0
+
+
+def _read_run_results(log_path: str) -> tuple[str | None, list[dict[str, Any]]]:
+    """Reads the browser version and each test's results from a raw log."""
+    browser_version = None
+    results: dict[str, dict[str, Any]] = {}
+    if not os.path.exists(log_path):
+        return None, []
+    with open(log_path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            action = event.get("action")
+            if action == "suite_start":
+                run_info = event.get("run_info") or {}
+                browser_version = run_info.get("browser_version")
+                continue
+            test_id = event.get("test")
+            if not test_id:
+                continue
+            result = results.setdefault(
+                test_id, {"test": test_id, "status": None, "subtests": []}
+            )
+            if action == "test_status":
+                result["subtests"].append(
+                    {
+                        "name": event.get("subtest"),
+                        "status": event.get("status"),
+                        "message": event.get("message"),
+                    }
+                )
+            elif action == "test_end":
+                result["status"] = event.get("status")
+                result["message"] = event.get("message")
+    return browser_version, list(results.values())
+
+
+def _run_status(results: list[dict[str, Any]]) -> str:
+    """Sums up a run: `pass`, `fail` (assertions) or `error` (the harness).
+
+    Errors, timeouts and crashes usually mean a broken test. Assertion
+    failures can be a broken test or a browser bug, so they need a person.
+    """
+    if not results:
+        return "error"
+    statuses = [r["status"] for r in results]
+    statuses += [s["status"] for r in results for s in r["subtests"]]
+    if any(
+        s in ("ERROR", "TIMEOUT", "CRASH", "NOTRUN", None) for s in statuses
+    ):
+        return "error"
+    if any(s in ("FAIL", "PRECONDITION_FAILED") for s in statuses):
+        return "fail"
+    return "pass"
+
+
+def run_test_file(
+    wpt_path: Path,
+    rel_path: str,
+    browser: str,
+    channel: str,
+    ui: UIProvider,
+    headless: bool = True,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Runs one test file with `./wpt run`.
+
+    Args:
+        wpt_path: The root directory of the WPT repository.
+        rel_path: The test's path from the repository root.
+        browser: The browser to use for testing.
+        channel: The browser channel.
+        ui: The UIProvider instance for printing output to the terminal.
+        headless: Set False to run tests with a visible browser UI.
+
+    Returns:
+        The result for the agent (`status`, failing tests and logs), and a
+        record of the run: the browser, its version, the overall status
+        (see `_run_status`), each test's and subtest's result, and how long
+        it took.
+    """
+    record: dict[str, Any] = {
+        "path": rel_path,
+        "browser": browser,
+        "channel": channel,
+        "browser_version": None,
+        "status": "error",
+        "results": [],
+    }
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        log_path = f.name
+
+    start = time.monotonic()
+    try:
+        cmd = [
+            "./wpt",
+            "run",
+            "--channel",
+            channel,
+        ]
+        if headless:
+            cmd.append("--headless")
+        cmd.extend(
+            [
+                "--log-raw",
+                log_path,
+                browser,
+                f"./{rel_path}",
+            ]
+        )
+
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(wpt_path),
+                capture_output=True,
+                text=True,
+                timeout=WPT_RUN_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as e:
+            partial_stdout = (
+                e.stdout.decode("utf-8")
+                if isinstance(e.stdout, bytes)
+                else (e.stdout or "")
+            )
+            partial_stderr = (
+                e.stderr.decode("utf-8")
+                if isinstance(e.stderr, bytes)
+                else (e.stderr or "")
+            )
+            if partial_stdout:
+                ui.stream_text(partial_stdout)
+            if partial_stderr:
+                ui.stream_text(partial_stderr)
+            output_log = f"{partial_stdout}\n{partial_stderr}".strip()
+            record["error"] = f"Command timed out after {e.timeout} s."
+            return {
+                "status": "error",
+                "error": record["error"],
+                "output": output_log,
+            }, record
+
+        if result.stdout:
+            ui.stream_text(result.stdout)
+        if result.stderr:
+            ui.stream_text(result.stderr)
+
+        output_log = f"{result.stdout}\n{result.stderr}".strip()
+        record["browser_version"], record["results"] = _read_run_results(
+            log_path
+        )
+        record["status"] = _run_status(record["results"])
+
+        if result.returncode == 0:
+            # Expected results can list known failures, so trust the log.
+            if not record["results"]:
+                record["status"] = "pass"
+            return {
+                "status": "success",
+                "message": "All assertions passed.",
+                "output": output_log,
+            }, record
+
+        failing_tests = _parse_test_results(log_path)
+
+        if not failing_tests:
+            record["status"] = "error"
+            record["error"] = "Test runner crashed or failed."
+            return {
+                "status": "error",
+                "error": "Test runner crashed or failed. See output.",
+                "output": output_log,
+            }, record
+
+        return {
+            "status": "failed",
+            "failing_tests": failing_tests,
+            "output": output_log,
+        }, record
+    finally:
+        record["duration"] = round(time.monotonic() - start, 1)
+        if os.path.exists(log_path):
+            os.remove(log_path)
+
+
 def create_agent_tools(
     wpt_path: Path,
     ui: UIProvider,
@@ -190,6 +388,7 @@ def create_agent_tools(
     include_run_tool: bool = True,
     omit_search_feature_tests: bool = False,
     web_features_manifest_path: str | Path | None = None,
+    run_log: RunLog | None = None,
 ) -> list[FunctionTool]:
     """Creates a suite of strictly validated tools for the ADK agent.
 
@@ -205,10 +404,13 @@ def create_agent_tools(
         include_run_tool: Whether to include the run_wpt_test tool.
         omit_search_feature_tests: Whether to leave out search_feature_tests.
         web_features_manifest_path: The manifest search_feature_tests reads.
+        run_log: Where run_wpt_test records each run.
 
     Returns:
         A list of ADK `FunctionTool` objects.
     """
+    if run_log is None:
+        run_log = RunLog()
 
     def read_file(
         file_path: str,
@@ -299,6 +501,7 @@ def create_agent_tools(
 
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
+            run_log.changes += 1
             return {"status": "success"}
         except (OSError, ValueError) as e:
             return {"status": "error", "error": str(e)}
@@ -408,6 +611,7 @@ def create_agent_tools(
             import shutil
 
             shutil.rmtree(target)
+            run_log.changes += 1
             return {"status": "success"}
         except (OSError, ValueError) as e:
             return {"status": "error", "error": str(e)}
@@ -429,6 +633,7 @@ def create_agent_tools(
                     "error": f"File not found: {file_path}",
                 }
             target.unlink()
+            run_log.changes += 1
             return {"status": "success"}
         except (OSError, ValueError) as e:
             return {"status": "error", "error": str(e)}
@@ -457,6 +662,7 @@ def create_agent_tools(
             import shutil
 
             shutil.move(source, destination)
+            run_log.changes += 1
             return {"status": "success"}
         except (OSError, ValueError) as e:
             return {"status": "error", "error": str(e)}
@@ -572,92 +778,16 @@ def create_agent_tools(
                     "status": "error",
                     "error": f"File not found: {file_path}",
                 }
-
             rel_path = target.relative_to(wpt_path).as_posix()
-
-            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-                log_path = f.name
-
-            try:
-                cmd = [
-                    "./wpt",
-                    "run",
-                    "--channel",
-                    channel,
-                ]
-                if headless:
-                    cmd.append("--headless")
-                cmd.extend(
-                    [
-                        "--log-raw",
-                        log_path,
-                        browser,
-                        f"./{rel_path}",
-                    ]
-                )
-
-                try:
-                    result = subprocess.run(
-                        cmd,
-                        cwd=str(wpt_path),
-                        capture_output=True,
-                        text=True,
-                        timeout=WPT_RUN_TIMEOUT_SECONDS,
-                    )
-                except subprocess.TimeoutExpired as e:
-                    partial_stdout = (
-                        e.stdout.decode("utf-8")
-                        if isinstance(e.stdout, bytes)
-                        else (e.stdout or "")
-                    )
-                    partial_stderr = (
-                        e.stderr.decode("utf-8")
-                        if isinstance(e.stderr, bytes)
-                        else (e.stderr or "")
-                    )
-                    if partial_stdout:
-                        ui.stream_text(partial_stdout)
-                    if partial_stderr:
-                        ui.stream_text(partial_stderr)
-                    output_log = f"{partial_stdout}\n{partial_stderr}".strip()
-                    return {
-                        "status": "error",
-                        "error": f"Command timed out after {e.timeout} s.",
-                        "output": output_log,
-                    }
-
-                if result.stdout:
-                    ui.stream_text(result.stdout)
-                if result.stderr:
-                    ui.stream_text(result.stderr)
-
-                output_log = f"{result.stdout}\n{result.stderr}".strip()
-
-                if result.returncode == 0:
-                    return {
-                        "status": "success",
-                        "message": "All assertions passed.",
-                        "output": output_log,
-                    }
-
-                failing_tests = _parse_test_results(log_path)
-
-                if not failing_tests:
-                    return {
-                        "status": "error",
-                        "error": "Test runner crashed or failed. See output.",
-                        "output": output_log,
-                    }
-
-                return {
-                    "status": "failed",
-                    "failing_tests": failing_tests,
-                    "output": output_log,
-                }
-            finally:
-                if os.path.exists(log_path):
-                    os.remove(log_path)
-
+            result, record = run_test_file(
+                wpt_path, rel_path, browser, channel, ui, headless
+            )
+            record["attempt"] = 1 + sum(
+                1 for run in run_log.runs if run["path"] == rel_path
+            )
+            record["changes"] = run_log.changes
+            run_log.runs.append(record)
+            return result
         except (OSError, ValueError, subprocess.SubprocessError) as e:
             return {"status": "error", "error": str(e)}
 
@@ -869,6 +999,7 @@ def create_agent_tools(
                 }
             new_content = content.replace(old_string, new_string)
             target.write_text(new_content, encoding="utf-8")
+            run_log.changes += 1
             return {"status": "success"}
         except (OSError, ValueError) as e:
             return {"status": "error", "error": str(e)}
