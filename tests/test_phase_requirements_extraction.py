@@ -21,7 +21,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from wptgen.config import Config
-from wptgen.models import FeatureMetadata, WorkflowContext
+from wptgen.models import FeatureMetadata, WorkflowContext, WorkflowError
 from wptgen.phases.requirements_extraction import (
     run_requirements_extraction,
     run_requirements_extraction_categorized,
@@ -392,6 +392,34 @@ async def test_run_requirements_extraction_categorized_partial_empty(
     assert "<category>Existence</category>" in res
     assert "<category>Error Scenarios</category>" in res
     assert res.count("<requirement id=") == 2
+
+
+@pytest.mark.asyncio
+async def test_run_requirements_extraction_categorized_failed_category(
+    mock_config: Config,
+    mock_ui: MagicMock,
+    mock_llm: MagicMock,
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    """A failed category request fails the phase instead of being skipped."""
+    context = WorkflowContext(
+        feature_id="feat-failed",
+        metadata=FeatureMetadata("Feat", "Desc", ["http://spec"]),
+        spec_contents={"http://spec": "Spec"},
+    )
+    jinja_env = MagicMock()
+    jinja_env.get_template.return_value.render.return_value = "Mock Template"
+    empty = "<requirements_list></requirements_list>"
+    mocker.patch(
+        "wptgen.phases.requirements_extraction.generate_safe",
+        side_effect=[empty, WorkflowError("timeout"), empty, empty, empty],
+    )
+    with pytest.raises(WorkflowError, match="categories: Common Use Cases"):
+        await run_requirements_extraction_categorized(
+            context, mock_config, mock_llm, mock_ui, jinja_env, tmp_path
+        )
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.asyncio

@@ -18,7 +18,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from wptgen.models import WorkflowAborted
+from wptgen.models import WorkflowAborted, WorkflowError
 
 from wptgen.config import Config
 from wptgen.phases.utils import confirm_prompts, generate_safe
@@ -97,12 +97,10 @@ async def test_generate_safe_show_responses_xml(
 async def test_generate_safe_exception(
     mock_ui: MagicMock, mock_llm: MagicMock, mock_config: Config
 ) -> None:
-    """Test that generate_safe handles exceptions gracefully and returns an
-    empty string.
-    """
+    """Test that generate_safe reports a failed request and raises."""
     mock_llm.generate_content.side_effect = Exception("test error")
-    res = await generate_safe("prompt", "Task", mock_llm, mock_ui, mock_config)
-    assert res == ""
+    with pytest.raises(WorkflowError, match="Task failed: test error"):
+        await generate_safe("prompt", "Task", mock_llm, mock_ui, mock_config)
     mock_ui.error.assert_called_once_with(
         "Task failed (mock-model): test error"
     )

@@ -85,7 +85,7 @@ def test_workflow_error_display(
     # Verify exit code
     assert result.exit_code == 1
     # Verify failure message is present
-    assert "Workflow completed with errors" in result.stdout
+    assert "Workflow completed with errors: Phase 1 failure" in result.stdout
     # Verify success message is NOT present
     assert "Workflow completed successfully" not in result.stdout
 

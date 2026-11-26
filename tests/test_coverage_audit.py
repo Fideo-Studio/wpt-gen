@@ -23,8 +23,9 @@ from jinja2 import Environment
 from pytest_mock import MockerFixture
 
 from wptgen.config import Config
-from wptgen.models import WorkflowContext, WPTContext
+from wptgen.models import WorkflowContext, WorkflowError, WPTContext
 from wptgen.phases.coverage_audit import (
+    check_worksheet_rows,
     combine_audit_responses,
     partition_requirements_xml,
     provide_coverage_report,
@@ -142,7 +143,8 @@ async def test_run_coverage_audit_single_partition(
     mocker.patch(
         "wptgen.phases.coverage_audit.generate_safe",
         return_value=(
-            "<status>SATISFIED</status>\n<audit_worksheet>W1</audit_worksheet>"
+            "<status>SATISFIED</status>\n"
+            "<audit_worksheet>R1: Test -> [COVERED by a.html]</audit_worksheet>"
         ),
     )
 
@@ -174,9 +176,7 @@ async def test_run_coverage_audit_multiple_partitions(
     mocker.patch("wptgen.phases.coverage_audit.confirm_prompts")
     mocker.patch(
         "wptgen.phases.coverage_audit.generate_safe",
-        return_value=(
-            "<status>SATISFIED</status>\n<audit_worksheet>W1</audit_worksheet>"
-        ),
+        side_effect=[_worksheet(range(25)), _worksheet(range(25, 50))],
     )
 
     result = await run_coverage_audit(
@@ -184,7 +184,54 @@ async def test_run_coverage_audit_multiple_partitions(
     )
 
     assert result is not None
-    assert "W1\nW1" in result
+    assert "R24: T -> [UNCOVERED]\nR25: T -> [UNCOVERED]" in result
+
+
+def _worksheet(ids: range) -> str:
+    rows = "\n".join(f"R{i}: T -> [UNCOVERED]" for i in ids)
+    return f"<audit_worksheet>\n{rows}\n</audit_worksheet>"
+
+
+@pytest.mark.asyncio
+async def test_run_coverage_audit_fails_on_a_failed_partition(
+    mocker: MockerFixture,
+    mock_config: Config,
+    mock_ui: MagicMock,
+    mock_llm: MagicMock,
+    mock_jinja_env: MagicMock,
+) -> None:
+    reqs = "".join(f'<requirement id="R{i}">T</requirement>' for i in range(50))
+    context = WorkflowContext(feature_id="test", requirements_xml=reqs)
+    mocker.patch("wptgen.phases.coverage_audit.confirm_prompts")
+    mocker.patch(
+        "wptgen.phases.coverage_audit.generate_safe",
+        side_effect=[_worksheet(range(25)), WorkflowError("timeout")],
+    )
+
+    with pytest.raises(WorkflowError, match="1 of 2 coverage audit"):
+        await run_coverage_audit(
+            context, mock_config, mock_llm, mock_ui, mock_jinja_env
+        )
+    assert context.audit_response is None
+
+
+@pytest.mark.parametrize(
+    ("worksheet", "message"),
+    [
+        ("R1: a -> [UNCOVERED]\nR3 is covered", "no row for R2, R3"),
+        (
+            "R1: a -> [UNCOVERED]\nR2: b -> [UNCOVERED]\n"
+            "R3: c -> [UNCOVERED]\nR1: a -> [COVERED by x.html]",
+            "more than one row for R1",
+        ),
+    ],
+)
+def test_check_worksheet_rows(worksheet: str, message: str) -> None:
+    reqs = "".join(f'<requirement id="R{i}">T</requirement>' for i in (1, 2, 3))
+    with pytest.raises(WorkflowError, match=message):
+        check_worksheet_rows(
+            reqs, f"<audit_worksheet>{worksheet}</audit_worksheet>"
+        )
 
 
 @pytest.mark.asyncio
@@ -198,6 +245,10 @@ async def test_provide_coverage_report_success(
 
     await provide_coverage_report(context, mock_config, mock_ui)
     mock_ui.report_coverage_audit.assert_called_with("Mock audit response")
+    mock_ui.warning.assert_called_once_with(
+        "No existing tests were audited, so every requirement is reported "
+        "as uncovered."
+    )
 
 
 def test_partition_requirements_xml_empty() -> None:
@@ -246,9 +297,7 @@ async def test_run_coverage_audit_always_brief_suggestions(
     mocker.patch("wptgen.phases.coverage_audit.confirm_prompts")
     mocker.patch(
         "wptgen.phases.coverage_audit.generate_safe",
-        return_value=(
-            "<status>SATISFIED</status>\n<audit_worksheet>W1</audit_worksheet>"
-        ),
+        return_value="<audit_worksheet>R1: Test -> [UNCOVERED]</audit_worksheet>",
     )
 
     await run_coverage_audit(

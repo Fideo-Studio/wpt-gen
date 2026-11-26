@@ -223,9 +223,9 @@ def _workflow_error_handler(ui: UIProvider) -> Generator[None, None, None]:
         # Catch configuration errors (like missing API keys) and exit gracefully
         ui.error(f"Configuration Error: {str(e)}")
         raise typer.Exit(code=1) from e
-    except WorkflowError:
+    except WorkflowError as e:
         ui.print()
-        ui.error("Workflow completed with errors.")
+        ui.error(f"Workflow completed with errors: {e}")
         raise typer.Exit(code=1) from None
     except Exception as e:
         # Catch unexpected runtime errors

@@ -23,7 +23,12 @@ from jinja2 import Environment
 from wptgen.config import Config
 from wptgen.context import slug_for_spec_url
 from wptgen.llm import LLMClient
-from wptgen.models import REQUIREMENT_CATEGORIES, WorkflowContext, WorkflowPhase
+from wptgen.models import (
+    REQUIREMENT_CATEGORIES,
+    WorkflowContext,
+    WorkflowError,
+    WorkflowPhase,
+)
 from wptgen.phases.utils import (
     confirm_prompts,
     generate_safe,
@@ -240,13 +245,19 @@ async def run_requirements_extraction_categorized(
         total_tasks = len(REQUIREMENT_CATEGORIES)
         completed_count = 0
 
+        failed: list[str] = []
+
         async def wrap_with_progress(
             name: str, extraction_prompt: str, extraction_system_prompt: str
         ) -> str | None:
             nonlocal completed_count
-            res = await extract_for_category(
-                name, extraction_prompt, extraction_system_prompt
-            )
+            try:
+                res = await extract_for_category(
+                    name, extraction_prompt, extraction_system_prompt
+                )
+            except WorkflowError:
+                failed.append(name)
+                res = None
             completed_count += 1
             remaining = total_tasks - completed_count
             progress.update(
@@ -270,6 +281,12 @@ async def run_requirements_extraction_categorized(
                         strict=True,
                     )
                 ]
+            )
+
+        if failed:
+            names = ", ".join(sorted(failed))
+            raise WorkflowError(
+                f"Requirements extraction failed for categories: {names}."
             )
 
         all_requirements: list[str] = []

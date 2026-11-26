@@ -20,7 +20,7 @@ from pathlib import Path
 
 
 from wptgen.config import Config
-from wptgen.models import WorkflowAborted, WorkflowPhase
+from wptgen.models import WorkflowAborted, WorkflowError, WorkflowPhase
 from wptgen.llm import LLMClient
 from wptgen.ui import UIProvider
 
@@ -112,7 +112,7 @@ async def generate_safe(
     temperature: float | None = None,
     model: str | None = None,
 ) -> str:
-    """Helper to run LLM generation in a thread and handle errors gracefully.
+    """Helper to run LLM generation in a thread.
 
     Args:
       prompt: The user prompt.
@@ -125,7 +125,10 @@ async def generate_safe(
       model: Optional model override.
 
     Returns:
-      The generated text response, or an empty string on failure.
+      The generated text response.
+
+    Raises:
+      WorkflowError: If the request still fails after the client's retries.
     """
     target_model = model or llm.model
     effective_temp = (
@@ -150,7 +153,7 @@ async def generate_safe(
         return response
     except Exception as e:
         ui.error(f"{task_name} failed ({target_model}): {e}")
-        return ""
+        raise WorkflowError(f"{task_name} failed: {e}") from e
 
 
 def load_cached_requirements(

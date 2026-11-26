@@ -126,6 +126,25 @@ MAX_FILE_READ_BYTES = 5 * 1024 * 1024  # 5MB
 MAX_FILE_WRITE_BYTES = 5 * 1024 * 1024  # 5MB
 
 
+def _lint_findings(stdout: str) -> list[str]:
+    """Formats `./wpt lint --json` output as `path:line: message (RULE)`."""
+    findings = []
+    for line in stdout.splitlines():
+        try:
+            error = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(error, dict) or "rule" not in error:
+            continue
+        where = error.get("path", "")
+        line_number = error.get("lineno")
+        if line_number:
+            where += f":{line_number}"
+        message, rule = error.get("message"), error["rule"]
+        findings.append(f"{where}: {message} ({rule})")
+    return findings
+
+
 def _validate_safe_path(target_path: Path, wpt_root: Path) -> Path:
     """Validates that a target path resolves to within the WPT root directory.
 
@@ -463,7 +482,7 @@ def create_agent_tools(
 
             try:
                 result = subprocess.run(
-                    ["./wpt", "lint", f"./{rel_path}"],
+                    ["./wpt", "lint", "--json", f"./{rel_path}"],
                     cwd=str(wpt_path),
                     capture_output=True,
                     text=True,
@@ -477,14 +496,20 @@ def create_agent_tools(
 
             if result.returncode == 0:
                 return {"status": "success", "message": "No lint errors found."}
-            else:
-                # Provide raw output with linter error details
-                return {
-                    "status": "failed",
-                    "lint_output": result.stdout.strip()
-                    + "\n"
-                    + result.stderr.strip(),
-                }
+            findings = _lint_findings(result.stdout)
+            if result.returncode == 1 and findings:
+                return {"status": "failed", "lint_output": "\n".join(findings)}
+            # Anything else is the linter itself failing, not lint errors.
+            stderr = [
+                line
+                for line in result.stderr.strip().splitlines()
+                if not line.startswith("[notice]")
+            ]
+            return {
+                "status": "error",
+                "error": f"wpt lint exited with {result.returncode}:\n"
+                + "\n".join(stderr[-20:]),
+            }
         except (OSError, ValueError, subprocess.SubprocessError) as e:
             return {"status": "error", "error": str(e)}
 

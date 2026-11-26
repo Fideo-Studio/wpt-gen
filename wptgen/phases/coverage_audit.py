@@ -22,7 +22,8 @@ from jinja2 import Environment
 
 from wptgen.config import Config
 from wptgen.llm import LLMClient
-from wptgen.models import WorkflowContext, WorkflowPhase
+from wptgen.models import WorkflowContext, WorkflowError, WorkflowPhase
+from wptgen.phases.report_render import parse_audit_worksheet
 from wptgen.phases.utils import confirm_prompts, generate_safe
 from wptgen.ui import UIProvider
 from wptgen.utils import extract_xml_tag, parse_suggestions
@@ -68,6 +69,31 @@ def partition_requirements_xml(
         start_idx = end_idx
 
     return partitions
+
+
+def check_worksheet_rows(requirements_xml: str, audit_response: str) -> None:
+    """Checks that the audit worksheet has one row per requirement.
+
+    Raises:
+      WorkflowError: If a requirement has no readable row, or more than one.
+    """
+    expected = re.findall(
+        r'<requirement\b[^>]*\bid="([^"]+)"', requirements_xml or ""
+    )
+    worksheet = extract_xml_tag(audit_response, "audit_worksheet") or ""
+    found = [row.id for row in parse_audit_worksheet(worksheet)]
+    missing = [r for r in expected if r not in found]
+    repeated = sorted({r for r in found if found.count(r) > 1})
+    problems = []
+    if missing:
+        problems.append("no row for " + ", ".join(missing))
+    if repeated:
+        problems.append("more than one row for " + ", ".join(repeated))
+    if problems:
+        raise WorkflowError(
+            "Audit worksheet has " + "; ".join(problems) + ". Re-run with "
+            "--resume to repeat the audit."
+        )
 
 
 def combine_audit_responses(responses: list[str]) -> str:
@@ -193,20 +219,27 @@ async def run_coverage_audit(
 
     # Execute all partitions asynchronously
     tasks = []
+    failed: list[str] = []
     for i, (prompt, task_name) in enumerate(prompts):
 
         async def _run_with_index(
             idx: int, p: str, t_name: str
         ) -> tuple[int, str]:
-            res = await generate_safe(
-                p,
-                t_name,
-                llm,
-                ui,
-                config,
-                system_instruction=audit_system_prompt,
-                model=config.get_model_for_phase(WorkflowPhase.COVERAGE_AUDIT),
-            )
+            try:
+                res = await generate_safe(
+                    p,
+                    t_name,
+                    llm,
+                    ui,
+                    config,
+                    system_instruction=audit_system_prompt,
+                    model=config.get_model_for_phase(
+                        WorkflowPhase.COVERAGE_AUDIT
+                    ),
+                )
+            except WorkflowError:
+                failed.append(t_name)
+                res = ""
             return idx, res
 
         tasks.append(asyncio.create_task(_run_with_index(i, prompt, task_name)))
@@ -235,6 +268,12 @@ async def run_coverage_audit(
         idx, result = await tasks[0]
         audit_response = result
 
+    if failed:
+        raise WorkflowError(
+            f"{len(failed)} of {total_tasks} coverage audit request(s) failed."
+        )
+    check_worksheet_rows(context.requirements_xml or "", audit_response)
+
     context.audit_response = audit_response
     return audit_response
 
@@ -244,6 +283,12 @@ async def provide_coverage_report(
 ) -> None:
     """Prints the coverage audit report and optionally saves it to a file."""
     assert context.audit_response is not None
+
+    if not (context.wpt_context and context.wpt_context.test_contents):
+        ui.warning(
+            "No existing tests were audited, so every requirement is "
+            "reported as uncovered."
+        )
 
     audit_worksheet = extract_xml_tag(context.audit_response, "audit_worksheet")
     test_suggestions_block = extract_xml_tag(

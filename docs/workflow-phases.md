@@ -24,13 +24,14 @@ The `wpt-gen generate` command orchestrates a complex, multi-phase agentic workf
     *   **Single Prompt (via `--single-prompt-requirements` flag):** A simpler approach attempting extraction in a single pass without categorization.
         *   **System Prompt:** `requirements_extraction_system.jinja`
         *   **User Prompt:** `requirements_extraction.jinja`
+    *   A request that still fails after the LLM client's retries fails the phase; a failed category is never treated as one with no requirements.
 
 ## Phase 3: Coverage Audit (`coverage_audit.py`)
 
 *   **Responsibility:** Performs a delta analysis by comparing the synthesized requirements against the local test suite. This phase identifies gaps in coverage and produces high-level test suggestions.
 *   **Inputs:** `WorkflowContext` (with requirements and local test tree), `Config`, `LLMClient`, `UIProvider`, `jinja_env`.
 *   **Outputs:** A string of XML representing the audit response (including missing test suggestions), saved to `WorkflowContext.audit_response`.
-*   **LLM Integration:** Uses the LLM to cross-reference extracted requirements with existing test files to intelligently determine what new tests are needed. It automatically partitions requirements into chunks (e.g., `max_threshold=40`) to remain within context limits.
+*   **LLM Integration:** Uses the LLM to cross-reference extracted requirements with existing test files to intelligently determine what new tests are needed. It automatically partitions requirements into chunks (e.g., `max_threshold=40`) to remain within context limits. The phase fails if any partition's request fails, or if the merged worksheet doesn't have exactly one row per requirement.
     *   **System Prompt:** `coverage_audit_system.jinja`
     *   **User Prompt:** `coverage_audit.jinja`
 

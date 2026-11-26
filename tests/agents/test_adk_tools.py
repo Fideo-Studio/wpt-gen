@@ -359,10 +359,33 @@ def test_agent_tools_run_wpt_lint(tmp_path: Path, mocker: Any) -> None:
 
     mock_run = mocker.patch("wptgen.agents.tools.subprocess.run")
     mock_run.return_value.returncode = 1
-    mock_run.return_value.stdout = "lint error"
-    mock_run.return_value.stderr = ""
+    mock_run.return_value.stdout = (
+        '{"path": "test.html", "lineno": 2, "rule": "TRAILING WHITESPACE", '
+        '"message": "Whitespace at EOL"}\n'
+        '{"path": "test.html", "lineno": null, "rule": "MISSING-LINK", '
+        '"message": "Testcase file must have a link to a spec"}\n'
+    )
+    mock_run.return_value.stderr = "[notice] A new release of pip\n"
     result = tool.func(str(test_file))
-    assert result["status"] == "failed"
+    assert result == {
+        "status": "failed",
+        "lint_output": (
+            "test.html:2: Whitespace at EOL (TRAILING WHITESPACE)\n"
+            "test.html: Testcase file must have a link to a spec "
+            "(MISSING-LINK)"
+        ),
+    }
+
+    mock_run.return_value.returncode = 70
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = (
+        "[notice] A new release of pip\nFileNotFoundError: lint.ignore\n"
+    )
+    result = tool.func(str(test_file))
+    assert result == {
+        "status": "error",
+        "error": "wpt lint exited with 70:\nFileNotFoundError: lint.ignore",
+    }
 
     mock_run.return_value.returncode = 0
     result = tool.func(str(test_file))
@@ -656,7 +679,7 @@ def test_agent_tools_run_wpt_lint_flag_injection(
     assert result["status"] == "success"
     mock_run.assert_called_once()
     args, kwargs = mock_run.call_args
-    assert args[0] == ["./wpt", "lint", "./--dummy-flag.html"]
+    assert args[0] == ["./wpt", "lint", "--json", "./--dummy-flag.html"]
 
 
 def test_agent_tools_run_wpt_test_flag_injection(
