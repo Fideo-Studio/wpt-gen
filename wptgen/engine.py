@@ -81,10 +81,24 @@ class WPTGenEngine:
         """Returns the path to the resume file for a given web feature ID."""
         return self.cache_dir / f"resume_{feature_id}.json"
 
+    # The snapshot step needs one small wptgen/engine.py change:
+    # _save_resume_state() currently writes resume_<feature>.json to
+    # cache_path, not to --state-dir. The plan assumes the resume file is in
+    # the state dir, so an explicit state_dir must write it there while the
+    # cache path remains the fallback for plain --resume
+    def _resume_file_path(self, feature_id: str) -> Path:
+        state_dir = (
+            Path(self.config.state_dir)
+            if self.config.state_dir
+            else self.cache_dir
+        )
+        return state_dir / f"resume_{feature_id}.json"
+
     def _save_resume_state(self, context: WorkflowContext) -> None:
-        """Serializes and saves the current workflow context to the cache."""
+        """Saves context to the state dir when set, otherwise the cache."""
         assert context.feature_id is not None
-        resume_file = self._get_resume_file_path(context.feature_id)
+        resume_file = self._resume_file_path(context.feature_id)
+        resume_file.parent.mkdir(parents=True, exist_ok=True)
         with open(resume_file, "w", encoding="utf-8") as f:
             json.dump(context.to_dict(), f, indent=2)
 

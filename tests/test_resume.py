@@ -123,6 +123,44 @@ def test_engine_save_load_resume_state(engine: WPTGenEngine) -> None:
     assert loaded_context.requirements_xml == "<reqs/>"
 
 
+def test_save_resume_state_uses_explicit_state_dir(
+    engine: WPTGenEngine, tmp_path: Path
+) -> None:
+    """An explicit state dir receives the resume file instead of the cache."""
+    assert engine.config.cache_path is not None
+    state_dir = tmp_path / "gap-state"
+    engine.config.state_dir = str(state_dir)
+    context = WorkflowContext(
+        feature_id="test-feat", requirements_xml="<reqs/>"
+    )
+
+    engine._save_resume_state(context)
+
+    resume_file = state_dir / "resume_test-feat.json"
+    assert resume_file.exists()
+    payload = json.loads(resume_file.read_text(encoding="utf-8"))
+    assert payload["feature_id"] == "test-feat"
+    assert not (
+        Path(engine.config.cache_path) / "resume_test-feat.json"
+    ).exists()
+
+
+def test_save_resume_state_uses_cache_without_state_dir(
+    engine: WPTGenEngine,
+) -> None:
+    """Without an explicit state dir, the resume file stays in the cache."""
+    assert engine.config.state_dir is None
+    assert engine.config.cache_path is not None
+    context = WorkflowContext(
+        feature_id="test-feat", requirements_xml="<reqs/>"
+    )
+
+    engine._save_resume_state(context)
+
+    resume_file = Path(engine.config.cache_path) / "resume_test-feat.json"
+    assert resume_file.exists()
+
+
 @pytest.mark.asyncio
 async def test_run_async_workflow_resume_skips_phases(
     engine: WPTGenEngine, mocker: MockerFixture
