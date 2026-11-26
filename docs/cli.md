@@ -67,7 +67,7 @@ After generation, `wpt-gen` maps each new test to the features the generator dec
 #### Feature & Requirement Overrides
 | Option | Shorthand | Description |
 | :--- | :--- | :--- |
-| `--spec-urls` | `-u` | Comma-separated list of W3C Spec URLs to use, bypassing automatic fetching. |
+| `--spec-urls` | `-u` | Comma-separated list of W3C Spec URLs to use, bypassing automatic fetching. A URL with a `#fragment` uses only that section, so list several to include more sections, or leave the fragment off to use the whole document. |
 | `--description` | `-d` | Provide a manual description/summary of the feature to the agent. |
 | `--detailed-requirements` | | Use an iterative process to extract highly granular requirements (slower). |
 | `--draft` | | Enable fetching metadata from the draft features directory. |

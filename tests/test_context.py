@@ -898,6 +898,54 @@ def test_slice_html_by_inline_anchor_walks_to_enclosing_section() -> None:
     assert "other content" not in sliced
 
 
+def test_slice_html_by_inline_anchor_without_sections_uses_previous_heading() -> (
+    None
+):
+    """In a spec without <section> wrappers, a <dfn> anchor slices from the
+    nearest heading before it, not the whole document or the <dfn> alone."""
+    html = """
+    <html><body><main>
+    <h2 id="intro">Intro</h2>
+    <p>intro content</p>
+    <h3 id="dialog">The dialog element</h3>
+    <p>The <dfn id="attr-dialog-closedby">closedby</dfn> attribute...</p>
+    <h4>Sub</h4>
+    <p>sub content</p>
+    <h3 id="next">Next element</h3>
+    <p>should be excluded</p>
+    </main></body></html>
+    """
+    sliced = _slice_html_by_anchor(html, "attr-dialog-closedby")
+    assert sliced is not None
+    assert "The dialog element" in sliced
+    assert "sub content" in sliced
+    assert "intro content" not in sliced
+    assert "should be excluded" not in sliced
+
+
+def test_slice_html_by_clause_anchor_returns_clause() -> None:
+    """An anchor on an element whose first child is a heading returns that
+    element, not its parent (as in ECMAScript's <emu-clause>)."""
+    html = """
+    <html><body>
+    <emu-clause id="sec-array-prototype">
+      <h1>Properties of the Array Prototype Object</h1>
+      <emu-clause id="sec-array.prototype.at">
+        <h1>Array.prototype.at ( index )</h1>
+        <p>at steps</p>
+      </emu-clause>
+      <emu-clause id="sec-array.prototype.concat">
+        <h1>Array.prototype.concat ( ...items )</h1>
+      </emu-clause>
+    </emu-clause>
+    </body></html>
+    """
+    sliced = _slice_html_by_anchor(html, "sec-array.prototype.at")
+    assert sliced is not None
+    assert "at steps" in sliced
+    assert "concat" not in sliced
+
+
 def test_slice_html_by_anchor_missing_returns_none() -> None:
     """A missing anchor returns None so callers can fall back."""
     html = "<html><body><h2 id='real'>Real</h2></body></html>"

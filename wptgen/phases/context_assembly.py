@@ -22,6 +22,7 @@ from wptgen.context import (
     extract_feature_metadata,
     extract_wpt_paths,
     fetch_and_extract_text,
+    fetch_and_slice_spec,
     fetch_chromestatus_metadata,
     fetch_feature_yaml,
     fetch_mdn_urls,
@@ -146,7 +147,7 @@ async def run_context_assembly(
     with ui.status("Fetching and extracting text..."):
         results = await asyncio.gather(
             *[
-                asyncio.to_thread(fetch_and_extract_text, url)
+                asyncio.to_thread(fetch_and_slice_spec, url, ui.warning)
                 for url in metadata.specs
             ],
             return_exceptions=True,

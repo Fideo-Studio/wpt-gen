@@ -22,6 +22,7 @@ from pytest_mock import MockerFixture
 
 from wptgen.config import Config
 from wptgen.models import FeatureMetadata, WorkflowError, WPTContext
+from wptgen.phases import context_assembly
 from wptgen.phases.context_assembly import (
     LARGE_FEATURE_TEST_COUNT,
     run_context_assembly,
@@ -48,9 +49,23 @@ def mock_resolve_manifest(mocker: MockerFixture) -> MagicMock:
     )
 
 
+@pytest.fixture(autouse=True)
+def mock_slice_spec(mocker: MockerFixture) -> MagicMock:
+    """Route spec fetches through fetch_and_extract_text, which tests patch."""
+    return mocker.patch(
+        "wptgen.phases.context_assembly.fetch_and_slice_spec",
+        side_effect=lambda url, warn=None: (
+            vars(context_assembly)["fetch_and_extract_text"](url)
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_run_context_assembly_success(
-    mock_config: Config, mock_ui: MagicMock, mocker: MockerFixture
+    mock_config: Config,
+    mock_ui: MagicMock,
+    mocker: MockerFixture,
+    mock_slice_spec: MagicMock,
 ) -> None:
     """Test successful context assembly for a registered feature."""
     mocker.patch(
@@ -82,6 +97,7 @@ async def test_run_context_assembly_success(
     assert context.metadata is not None
     assert context.metadata.name == "Feat"
     assert context.spec_contents == {"http://spec": "Spec Content"}
+    mock_slice_spec.assert_called_once_with("http://spec", mock_ui.warning)
     assert context.explainer_contents == {
         "http://explainer": "Explainer Content"
     }

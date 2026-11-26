@@ -492,12 +492,19 @@ _SECTIONING_TAGS = ("section", "article")
 
 
 def _find_section_root(target: Tag) -> Tag:
-    """Resolves the target element to the root of its section for slicing."""
+    """Resolves the target element to the root of its section for slicing.
+
+    An anchor inside a section (such as a <dfn>) resolves to the enclosing
+    <section>, or, in specs that don't wrap sections, to the nearest heading
+    before it.
+    """
     if target.name in _SECTIONING_TAGS or target.name in _HEADING_TAGS:
         return target
-    for ancestor in target.parents:
+    for ancestor in [target, *target.parents]:
         if not isinstance(ancestor, Tag):
             continue
+        if ancestor.name in ("main", "body"):
+            break
         if ancestor.name in _SECTIONING_TAGS:
             return ancestor
         first_child = next(
@@ -505,7 +512,8 @@ def _find_section_root(target: Tag) -> Tag:
         )
         if first_child is not None and first_child.name in _HEADING_TAGS:
             return ancestor
-    return target
+    heading = target.find_previous(_HEADING_TAGS)
+    return heading if isinstance(heading, Tag) else target
 
 
 def _slice_html_by_anchor(html: str, fragment: str) -> str | None:

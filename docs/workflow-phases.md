@@ -7,6 +7,7 @@ The `wpt-gen generate` command orchestrates a complex, multi-phase agentic workf
 *   **Responsibility:** Aggregates the "Source of Truth" from external documentation (W3C Specs, MDN) and identifies existing test coverage in the local WPT repository.
 *   **Inputs:** `web_feature_id` (string), `Config` object, `UIProvider`.
 *   **Outputs:** A hydrated `WorkflowContext` object containing the web-features metadata, scraped specification context, and local WPT tree paths.
+*   **Spec sections:** A spec URL with a `#fragment` is cut down to that section: the section element or heading the anchor is in, up to the next heading at the same level. If the anchor isn't found, the whole document is used, with a warning.
 *   **LLM Integration:** None. This phase is entirely focused on gathering local and remote factual data deterministically to feed the subsequent phases.
 
 ## Phase 2: Requirements Extraction (`requirements_extraction.py`)
