@@ -183,6 +183,15 @@ class WPTContext:
 FLAGGED_RUN_STATUSES = ("fail", "error")
 
 
+def is_flagged(run_record: dict[str, Any]) -> bool:
+    """Whether a generated test's run record needs a person's review: its
+    final run failed, or a linter still reports findings or failed."""
+    if run_record["final"].get("status") in FLAGGED_RUN_STATUSES:
+        return True
+    lints = run_record.get("lint") or {}
+    return any(lint["status"] != "clean" for lint in lints.values())
+
+
 @dataclass
 class WorkflowContext:
     """Maintains the state of the WPT generation workflow."""

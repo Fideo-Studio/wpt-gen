@@ -17,7 +17,7 @@ import pytest
 
 pytest.importorskip("google.adk")
 
-from wptgen.agents.adk_evaluator import EVALUATOR_TOOL_ALLOWLIST
+from wptgen.agents.adk_evaluator import EVALUATOR_TOOL_ALLOWLIST, LINT_TOOLS
 
 
 def test_evaluator_tool_allowlist_is_pinned() -> None:
@@ -31,3 +31,14 @@ def test_evaluator_tool_allowlist_is_pinned() -> None:
             "run_lint_ext",
         }
     )
+
+
+def test_skip_lints_removes_only_the_linters() -> None:
+    """--skip-lints leaves the evaluator's read-only tools in place."""
+    assert LINT_TOOLS < EVALUATOR_TOOL_ALLOWLIST
+    assert EVALUATOR_TOOL_ALLOWLIST - LINT_TOOLS == {
+        "read_file",
+        "list_directory",
+        "search_files",
+        "search_file_contents",
+    }

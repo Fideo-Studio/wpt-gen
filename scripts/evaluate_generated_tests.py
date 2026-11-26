@@ -16,7 +16,9 @@
 Reads `generated_tests.json` from the run's state directory and evaluates each
 test against the spec URLs of the suggestion it was generated from. Findings
 reports are written to `<state dir>/evaluations/`, under each test's
-directory. References and helper files are skipped.
+directory. References and helper files are skipped. A test whose run record
+already has its lint results is evaluated with `--skip-lints`; see the run
+record for those findings.
 
 Usage:
     python scripts/evaluate_generated_tests.py STATE_DIR [-- EVALUATE_ARGS...]
@@ -69,6 +71,8 @@ def main() -> int:
         cmd = [wpt_gen, "evaluate", str(path), "--output-dir", str(output_dir)]
         if spec_urls:
             cmd += ["--spec-urls", ",".join(spec_urls)]
+        if run and run.get("lint"):
+            cmd.append("--skip-lints")
         print(f"Evaluating {path}...", flush=True)
         if subprocess.run(cmd + extra, check=False).returncode != 0:
             failed.append(str(path))

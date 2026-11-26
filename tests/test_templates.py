@@ -95,3 +95,13 @@ def test_adk_test_generator_template_puts_shared_context_first() -> None:
     )
     assert "<spec_document" not in bare
     assert "<directory_listing" not in bare
+
+
+def test_adk_evaluator_template_skip_lints() -> None:
+    """With --skip-lints the evaluator is told the linters already ran."""
+    env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)))
+    template = env.get_template("adk_evaluator.jinja")
+    args = {"test_path": "t.html", "skill_name": "s", "strategy": "distilled"}
+
+    assert "already run" in template.render(**args, skip_lints=True)
+    assert "already run" not in template.render(**args)

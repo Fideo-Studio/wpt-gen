@@ -15,6 +15,7 @@
 """Agentic test generation using the Google ADK framework."""
 
 import re
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,8 @@ from wptgen.agents.tools import (
     RunLog,
     _validate_safe_path,
     create_agent_tools,
+    lint_ext_file,
+    lint_file,
     run_test_file,
 )
 from wptgen.config import SKILLS_DIR, Config
@@ -388,7 +391,53 @@ def _record_final_runs(
                 for run in agent_runs
             ],
             "known_failures": failures,
+            "lint": _final_lints(root, rel_path, run_log),
         }
+
+
+def _final_lints(
+    root: Path, rel_path: str, run_log: RunLog
+) -> dict[str, dict[str, Any]]:
+    """Each linter's final result for a generated test.
+
+    As with runs, the agent's last lint is reused if no file changed after
+    it; otherwise the harness lints the file again.
+    """
+    lints = {}
+    for tool in ("wpt_lint", "lint_ext"):
+        agent_lints = [
+            lint
+            for lint in run_log.lints
+            if lint["path"] == rel_path and lint["tool"] == tool
+        ]
+        if agent_lints and agent_lints[-1]["changes"] == run_log.changes:
+            result, started_by = agent_lints[-1]["result"], "agent"
+        else:
+            started_by = "harness"
+            try:
+                result = (
+                    lint_file(root, rel_path)
+                    if tool == "wpt_lint"
+                    else lint_ext_file(root / rel_path)
+                )
+            except (OSError, subprocess.SubprocessError) as e:
+                result = {"status": "error", "error": str(e)}
+        if result["status"] == "failed":
+            findings = result.get("lint_output", "").splitlines()
+            for f in result.get("findings", []):
+                path, line, rule = f["path"], f["line"], f["rule_id"]
+                description = f["description"]
+                findings.append(f"{path}:{line}: {description} ({rule})")
+        else:
+            findings = [result["error"]] if result["status"] == "error" else []
+        lints[tool] = {
+            "status": {"success": "clean", "failed": "findings"}.get(
+                result["status"], "error"
+            ),
+            "findings": findings,
+            "started_by": started_by,
+        }
+    return lints
 
 
 def _directory_listing(wpt_root: Path, directory: str | None) -> str | None:

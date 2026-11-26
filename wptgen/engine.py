@@ -23,10 +23,10 @@ from jinja2 import Environment, FileSystemLoader
 from wptgen.config import TEMPLATE_DIR, Config
 from wptgen.llm import get_llm_client
 from wptgen.models import (
-    FLAGGED_RUN_STATUSES,
     WorkflowContext,
     WorkflowError,
     WorkflowPhase,
+    is_flagged,
 )
 from wptgen.phases.context_assembly import run_context_assembly
 from wptgen.phases.coverage_audit import (
@@ -443,7 +443,7 @@ class WPTGenEngine:
             flagged = [
                 Path(path).name
                 for path, record in context.run_records.items()
-                if record["final"]["status"] in FLAGGED_RUN_STATUSES
+                if is_flagged(record)
             ]
             flagged += context.unreported_suggestions
             if flagged:

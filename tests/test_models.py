@@ -16,7 +16,9 @@
 
 from typing import Any
 
-from wptgen.models import WorkflowContext
+import pytest
+
+from wptgen.models import WorkflowContext, is_flagged
 
 
 def test_workflow_context_from_dict_legacy_spec_contents() -> None:
@@ -57,3 +59,30 @@ def test_workflow_context_from_dict_legacy_spec_contents_no_metadata() -> None:
     }
     context = WorkflowContext.from_dict(data)
     assert context.spec_contents == {"unknown": "Legacy spec content string"}
+
+
+@pytest.mark.parametrize(
+    ("record", "flagged"),
+    [
+        ({"final": {"status": "pass"}}, False),
+        ({"final": {"status": "not_run"}}, False),
+        ({"final": {"status": "error"}}, True),
+        (
+            {
+                "final": {"status": "pass"},
+                "lint": {"wpt_lint": {"status": "clean"}},
+            },
+            False,
+        ),
+        (
+            {
+                "final": {"status": "pass"},
+                "lint": {"lint_ext": {"status": "findings"}},
+            },
+            True,
+        ),
+    ],
+)
+def test_is_flagged(record: dict[str, Any], flagged: bool) -> None:
+    """A failed final run, or a lint that isn't clean, needs review."""
+    assert is_flagged(record) is flagged

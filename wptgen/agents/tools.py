@@ -185,7 +185,7 @@ def _validate_safe_path(target_path: Path, wpt_root: Path) -> Path:
 
 @dataclass
 class RunLog:
-    """The test runs started through `run_wpt_test`.
+    """The test runs and lints started through the agent's tools.
 
     `changes` counts the file changes made through the tools so far, and each
     run records the count when it started, so a run is known to match the
@@ -194,6 +194,8 @@ class RunLog:
 
     runs: list[dict[str, Any]] = field(default_factory=list)
     changes: int = 0
+    # The lints started through `run_wpt_lint` and `run_lint_ext`.
+    lints: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _read_run_results(log_path: str) -> tuple[str | None, list[dict[str, Any]]]:
@@ -382,6 +384,72 @@ def run_test_file(
         record["duration"] = round(time.monotonic() - start, 1)
         if os.path.exists(log_path):
             os.remove(log_path)
+
+
+def lint_file(wpt_path: Path, rel_path: str) -> dict[str, Any]:
+    """Runs `./wpt lint` on one file.
+
+    Returns:
+        `status` `success`; `failed` with `lint_output`, one finding per
+        line; or `error` when the linter itself fails.
+    """
+    try:
+        result = subprocess.run(
+            ["./wpt", "lint", "--json", f"./{rel_path}"],
+            cwd=str(wpt_path),
+            capture_output=True,
+            text=True,
+            timeout=WPT_LINT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as e:
+        return {
+            "status": "error",
+            "error": f"Command timed out after {e.timeout} seconds.",
+        }
+
+    if result.returncode == 0:
+        return {"status": "success", "message": "No lint errors found."}
+    findings = _lint_findings(result.stdout)
+    if result.returncode == 1 and findings:
+        return {"status": "failed", "lint_output": "\n".join(findings)}
+    # Anything else is the linter itself failing, not lint errors.
+    stderr = [
+        line
+        for line in result.stderr.strip().splitlines()
+        if not line.startswith("[notice]")
+    ]
+    return {
+        "status": "error",
+        "error": f"wpt lint exited with {result.returncode}:\n"
+        + "\n".join(stderr[-20:]),
+    }
+
+
+def lint_ext_file(target: Path) -> dict[str, Any]:
+    """Runs wpt-gen's linter extension on one file.
+
+    Returns:
+        `status` `success`, or `failed` with a `findings` list of
+        `{rule_id, description, path, line}` objects.
+    """
+    errors = run_lint_ext_checks(str(target))
+    if not errors:
+        return {
+            "status": "success",
+            "message": "No linter-extension findings.",
+        }
+    return {
+        "status": "failed",
+        "findings": [
+            {
+                "rule_id": rule_id,
+                "description": description,
+                "path": path,
+                "line": line_no,
+            }
+            for (rule_id, description, path, line_no) in errors
+        ],
+    }
 
 
 def create_agent_tools(
@@ -690,39 +758,17 @@ def create_agent_tools(
                     "status": "error",
                     "error": f"File not found: {file_path}",
                 }
-
             rel_path = target.relative_to(wpt_path).as_posix()
-
-            try:
-                result = subprocess.run(
-                    ["./wpt", "lint", "--json", f"./{rel_path}"],
-                    cwd=str(wpt_path),
-                    capture_output=True,
-                    text=True,
-                    timeout=WPT_LINT_TIMEOUT_SECONDS,
-                )
-            except subprocess.TimeoutExpired as e:
-                return {
-                    "status": "error",
-                    "error": f"Command timed out after {e.timeout} seconds.",
+            result = lint_file(wpt_path, rel_path)
+            run_log.lints.append(
+                {
+                    "path": rel_path,
+                    "tool": "wpt_lint",
+                    "result": result,
+                    "changes": run_log.changes,
                 }
-
-            if result.returncode == 0:
-                return {"status": "success", "message": "No lint errors found."}
-            findings = _lint_findings(result.stdout)
-            if result.returncode == 1 and findings:
-                return {"status": "failed", "lint_output": "\n".join(findings)}
-            # Anything else is the linter itself failing, not lint errors.
-            stderr = [
-                line
-                for line in result.stderr.strip().splitlines()
-                if not line.startswith("[notice]")
-            ]
-            return {
-                "status": "error",
-                "error": f"wpt lint exited with {result.returncode}:\n"
-                + "\n".join(stderr[-20:]),
-            }
+            )
+            return result
         except (OSError, ValueError, subprocess.SubprocessError) as e:
             return {"status": "error", "error": str(e)}
 
@@ -746,25 +792,16 @@ def create_agent_tools(
                     "status": "error",
                     "error": f"File not found: {file_path}",
                 }
-
-            errors = run_lint_ext_checks(str(target))
-            if not errors:
-                return {
-                    "status": "success",
-                    "message": "No linter-extension findings.",
+            result = lint_ext_file(target)
+            run_log.lints.append(
+                {
+                    "path": target.relative_to(wpt_path).as_posix(),
+                    "tool": "lint_ext",
+                    "result": result,
+                    "changes": run_log.changes,
                 }
-            return {
-                "status": "failed",
-                "findings": [
-                    {
-                        "rule_id": rule_id,
-                        "description": description,
-                        "path": path,
-                        "line": line_no,
-                    }
-                    for (rule_id, description, path, line_no) in errors
-                ],
-            }
+            )
+            return result
         except (OSError, ValueError) as e:
             return {"status": "error", "error": str(e)}
 

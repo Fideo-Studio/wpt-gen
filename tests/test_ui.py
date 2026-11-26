@@ -240,6 +240,11 @@ def test_report_generation_summary_needs_review(
         [(Path("/wpt/a.html"), "c", "s"), (Path("/wpt/b.html"), "c", "s")],
         {
             "/wpt/a.html": {"final": {"status": "pass"}, "known_failures": []},
+            "/wpt/c.html": {
+                "final": {"status": "pass"},
+                "known_failures": [],
+                "lint": {"wpt_lint": {"status": "findings", "findings": ["x"]}},
+            },
             "/wpt/b.html": {
                 "final": {"status": "fail"},
                 "known_failures": [{"subtest": "s1", "reason": "no support"}],
@@ -254,6 +259,7 @@ def test_report_generation_summary_needs_review(
         "  - b.html: assertions failed; the agent says these are browser "
         "bugs: s1 (no support)"
     ) in printed
+    assert "  - c.html: 1 wpt_lint finding(s)" in printed
     assert "  - No files reported for the suggestion: D2" in printed
     assert not any(
         "a.html" in line for line in printed if line.startswith("  -")

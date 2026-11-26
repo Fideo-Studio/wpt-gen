@@ -53,6 +53,11 @@ EVALUATOR_TOOL_ALLOWLIST = frozenset(
 )
 
 
+# Left out with --skip-lints, for tests whose lint results are recorded
+# elsewhere (a generate run lints every test it writes).
+LINT_TOOLS = frozenset({"run_wpt_lint", "run_lint_ext"})
+
+
 class EvaluatorStrategy(StrEnum):
     """Evaluator strategies. Both are served by the single `wpt-evaluator`
     skill, which branches internally on the strategy label passed in the
@@ -182,9 +187,10 @@ async def evaluate_test_with_adk(
             omit_search_feature_tests=True,
         )
     )
-    tools: list[Any] = [
-        t for t in all_tools if t.func.__name__ in EVALUATOR_TOOL_ALLOWLIST
-    ]
+    allowed = EVALUATOR_TOOL_ALLOWLIST
+    if config.evaluator_skip_lints:
+        allowed = allowed - LINT_TOOLS
+    tools: list[Any] = [t for t in all_tools if t.func.__name__ in allowed]
     tools.append(FunctionTool(func=report_evaluation_complete))
     tools.append(FunctionTool(func=locate))
 
@@ -260,6 +266,7 @@ async def evaluate_test_with_adk(
         test_path=str(test_path),
         skill_name=EVALUATOR_SKILL_NAME,
         strategy=strategy,
+        skip_lints=config.evaluator_skip_lints,
     )
     content = types.Content(role="user", parts=[types.Part(text=prompt)])
 

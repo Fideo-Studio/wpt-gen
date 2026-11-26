@@ -1,7 +1,9 @@
 Evaluate the WPT test file at the path below using the {{ skill_name }} skill. Rigorously follow all instructions in the skill.
 
 <test_file>{{ test_path }}</test_file>
-
+{% if skip_lints %}
+The linters have already run on this test, and their results are recorded elsewhere, so `run_wpt_lint` and `run_lint_ext` aren't available. Skip the step that runs them. Still don't judge the `layer: deterministic` rules (or, for `raw`, anything `wpt lint` enforces) by hand: they stay the linters' job.
+{% endif %}
 To anchor a finding to a line, call the `locate` tool with the offending snippet and record a returned match's `text` as the finding's `citation`. Never write a line number or citation from memory — a citation must come from `locate` so it always matches the file. If a finding is about something missing or a whole-file property (no snippet to quote), leave `citation` empty.
 
 When the evaluation is complete, submit your findings via the `report_evaluation_complete` tool. Pass:

@@ -482,6 +482,25 @@ def test_record_final_runs(
             {"path": "b.html", "attempt": 1, "status": "pass", "changes": 0},
         ],
         changes=1,
+        lints=[
+            {
+                "path": "a.html",
+                "tool": "wpt_lint",
+                "result": {"status": "success"},
+                "changes": 1,
+            },
+        ],
+    )
+    lint = mocker.patch(
+        "wptgen.agents.adk_test_generator.lint_file",
+        return_value={
+            "status": "failed",
+            "lint_output": "b.html:3: tabs (TABS)",
+        },
+    )
+    mocker.patch(
+        "wptgen.agents.adk_test_generator.lint_ext_file",
+        return_value={"status": "success"},
     )
     harness_run = mocker.patch(
         "wptgen.agents.adk_test_generator.run_test_file",
@@ -517,6 +536,16 @@ def test_record_final_runs(
     assert records["m.html"]["final"]["status"] == "not_run"
     assert "r.html" not in records
     harness_run.assert_called_once()
+
+    # a.html's wpt lint is the agent's; everything else is linted again.
+    assert records["a.html"]["lint"]["wpt_lint"]["started_by"] == "agent"
+    assert records["b.html"]["lint"]["wpt_lint"] == {
+        "status": "findings",
+        "findings": ["b.html:3: tabs (TABS)"],
+        "started_by": "harness",
+    }
+    assert records["b.html"]["lint"]["lint_ext"]["status"] == "clean"
+    assert lint.call_count == 2  # b.html and m.html
 
 
 def test_directory_listing(tmp_path: Path) -> None:

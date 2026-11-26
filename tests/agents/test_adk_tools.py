@@ -486,6 +486,17 @@ def test_agent_tools_run_wpt_test_records_runs(
     tools["write_file"].func(str(test_file), "<!DOCTYPE html>")
     tools["run_wpt_test"].func(str(test_file))
 
+    mocker.patch(
+        "wptgen.agents.tools.subprocess.run",
+        return_value=MagicMock(returncode=0, stdout="", stderr=""),
+    )
+    tools["run_wpt_lint"].func(str(test_file))
+    tools["run_lint_ext"].func(str(test_file))
+    assert [(lint["tool"], lint["changes"]) for lint in run_log.lints] == [
+        ("wpt_lint", 1),
+        ("lint_ext", 1),
+    ]
+
     first, second = run_log.runs
     assert first["status"] == "fail"
     assert first["browser_version"] == "150"

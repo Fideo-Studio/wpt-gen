@@ -911,6 +911,17 @@ def evaluate(
             help="A single specification URL for convenience.",
         ),
     ] = None,
+    skip_lints: Annotated[
+        bool,
+        typer.Option(
+            "--skip-lints",
+            help=(
+                "Don't run `wpt lint` or wpt-gen's linter extension, for a "
+                "test whose lint results are already recorded, such as in a "
+                "generate run's run records."
+            ),
+        ),
+    ] = False,
     strategy: Annotated[
         EvaluatorStrategy,
         typer.Option(
@@ -969,6 +980,7 @@ def evaluate(
             wpt_dir_override=str(wpt_dir) if wpt_dir else None,
             require_api_key=True,
         )
+        config.evaluator_skip_lints = skip_lints
 
         _print_run_config(ui, config)
 

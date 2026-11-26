@@ -32,7 +32,7 @@ from rich.prompt import Confirm
 from rich.syntax import Syntax
 from rich.table import Table
 
-from wptgen.models import FLAGGED_RUN_STATUSES
+from wptgen.models import FLAGGED_RUN_STATUSES, is_flagged
 from wptgen.utils import parse_multi_file_response
 
 if TYPE_CHECKING:
@@ -55,14 +55,24 @@ def _run_label(final: dict[str, Any]) -> str:
 def _needs_review(
     run_records: dict[str, dict[str, Any]], unreported_suggestions: list[str]
 ) -> list[str]:
-    """Lists generated tests flagged by their final run, with the agent's
-    stated reasons, and suggestions whose agent never reported its files."""
+    """Lists generated tests flagged by their final run or lint, with the
+    agent's stated reasons, and suggestions whose agent never reported its
+    files."""
     lines = []
     for path, record in run_records.items():
-        final = record["final"]
-        if final.get("status") not in FLAGGED_RUN_STATUSES:
+        if not is_flagged(record):
             continue
-        line = f"{Path(path).name}: {_run_label(final)}"
+        final = record["final"]
+        problems = []
+        if final.get("status") in FLAGGED_RUN_STATUSES:
+            problems.append(_run_label(final))
+        for tool, lint in (record.get("lint") or {}).items():
+            if lint["status"] == "findings":
+                count = len(lint["findings"])
+                problems.append(f"{count} {tool} finding(s)")
+            elif lint["status"] == "error":
+                problems.append(f"{tool} failed")
+        line = f"{Path(path).name}: " + ", ".join(problems)
         reasons = []
         for failure in record["known_failures"]:
             subtest, reason = failure["subtest"], failure["reason"]
