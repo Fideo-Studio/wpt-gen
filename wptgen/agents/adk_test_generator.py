@@ -191,11 +191,6 @@ async def generate_test_with_adk(
         agent=agent, app_name="wpt-gen", session_service=session_service
     )
 
-    feature_name = context.metadata.name if context.metadata else "Unknown"
-    feature_description = (
-        context.metadata.description if context.metadata else "Unknown"
-    )
-
     # Configure output directory context
     if config.output_dir:
         output_dir = Path(config.output_dir).resolve()
@@ -205,11 +200,7 @@ async def generate_test_with_adk(
     prompt_template = jinja_env.get_template("adk_test_generator.jinja")
     prompt = prompt_template.render(
         output_dir=output_dir,
-        root_name=root_name,
         suggestion_xml=suggestion_xml,
-        feature_name=feature_name,
-        feature_description=feature_description,
-        spec_contents=context.spec_contents,
     )
     content = types.Content(role="user", parts=[types.Part(text=prompt)])
 

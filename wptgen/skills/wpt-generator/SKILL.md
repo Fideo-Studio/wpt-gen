@@ -20,12 +20,14 @@ Extract the following elements from the `<test_suggestion>` XML snippet provided
 - `<description>`: The underlying requirement or specification behavior to test.
 - `<spec_quote>` (optional): The exact specification text the requirement comes from. Use it to check that your assertions match what the spec actually says.
 - `<spec_url>` (can be multiple): A link to the specification. You MUST include these exact URLs in the generated test (using `<link rel="help" href="...">` for HTML tests, or as a single-line comment for `.js` tests).
+- `<related_test>` (optional, can be multiple): An existing test that the coverage audit found covers a related requirement, as a path from the repository root. A good place to start your research.
+- `<target_directory>` (optional): The directory that holds most of the existing tests the audit read for this feature.
 
 ### 2. Locate the Test Directory
 {% if has_feature_id %}
 Determine where this test belongs in the repository by finding where the feature's existing tests live.
-1. Use the `search_feature_tests` tool with the `<feature_id>` to find existing tests for this feature.
-2. Review the output to determine the target directory.
+1. If the suggestion has a `<target_directory>`, start there. Otherwise, use the `search_feature_tests` tool with the `<feature_id>` to find existing tests for this feature.
+2. Confirm the directory fits the `<description>`. If it doesn't, use `search_feature_tests` to find a better one.
 {% else %}
 Determine where this test belongs in the repository based on the specification URL and the feature description.
 1. Broadly search the repository for keywords related to the API or feature.
@@ -37,7 +39,7 @@ Since you are not provided with explicit steps or a test type, you MUST research
 {% endif %}1. Use the `list_directory` and `search_files` tools to explore existing tests in the target directory.
 2. Broaden your search: Search the broader repository (or related parent directories) for the API name or feature (e.g., `fetchLater`) to find existing test ecosystems, helper files (`resources/`), or data-driven testing paradigms that might live in adjacent directories.
 3. **IDL Check:** If the `<description>` involves testing interface exposure, attributes, or methods, you MUST check the repository's `interfaces/` directory for a corresponding `.idl` file (e.g., `interfaces/crash-reporting.idl`). If it exists, this strongly indicates you should use `idlharness.js` instead of manual boolean assertions.
-4. Read 1 or 2 existing tests that seem related to the `<description>`. Treat these as "Golden Examples".
+4. Read 1 or 2 existing tests that seem related to the `<description>`, starting with any `<related_test>` that fits. Treat these as "Golden Examples".
 5. Based on the requirement and the golden examples, decide on the best **Test Type**:
    - **Testharness test**: Best for JS APIs, parsing, DOM manipulation, or computed CSS values.
    - **Reftest**: Best for visual/rendering layout matching.

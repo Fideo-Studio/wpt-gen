@@ -41,7 +41,7 @@ The `wpt-gen generate` command orchestrates a complex, multi-phase agentic workf
 *   **Responsibility:** Translates user-selected test suggestions into functional WPT-compliant code (e.g., JavaScript tests, Reftests, or Crashtests) using specific style guide instructions.
 *   **Inputs:** `WorkflowContext` (with the audit response/test suggestions), `Config`, `LLMClient`, `UIProvider`, `jinja_env`.
 *   **Outputs:** A list of generated test files, each represented as a tuple of `(Path, string content, suggestion_xml)`. Saves the initial versions of these files to disk.
-*   **LLM Integration:** The LLM receives the test suggestion, WPT authoring guidelines, and relevant spec context to generate valid, idiomatic code for the new test files.
+*   **LLM Integration:** The LLM receives the test suggestion, WPT authoring guidelines, and relevant spec context to generate valid, idiomatic code for the new test files. Each suggestion also lists up to three existing tests the audit cited as covering related requirements (those in the same category first), and the directory that holds most of the audited tests, so the agent can start from them instead of searching.
     *   **System Prompt:** `test_generation_system.jinja`
     *   **User Prompt:** `test_generation.jinja`
 

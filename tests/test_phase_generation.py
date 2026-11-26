@@ -21,8 +21,9 @@ import pytest
 from pytest_mock import MockerFixture
 
 from wptgen.config import Config
-from wptgen.models import FeatureMetadata, WorkflowContext
+from wptgen.models import FeatureMetadata, WorkflowContext, WPTContext
 from wptgen.phases.generation import (
+    _audit_hints,
     _format_test_suggestion,
     _generate_adk_loop,
     run_single_test_generation,
@@ -370,3 +371,57 @@ def test_format_test_suggestion_brief_without_spec_quote() -> None:
     )
 
     assert "<spec_quote>" not in brief
+
+
+def test_audit_hints_prefer_tests_in_the_same_category(tmp_path: Path) -> None:
+    """Related tests come from covered requirements, same category first."""
+    root = tmp_path / "wpt"
+    context = WorkflowContext(
+        requirements_xml=(
+            '<requirement id="R1"><category>Existence</category>'
+            "<description>A</description></requirement>"
+            '<requirement id="R2"><category>Error Scenarios</category>'
+            "<description>B</description></requirement>"
+            '<requirement id="R3"><category>Error Scenarios</category>'
+            "<description>C must\n  throw</description></requirement>"
+        ),
+        audit_response=(
+            "<audit_worksheet>\n[Existence]\n"
+            "R1: A -> [COVERED by idlharness.window.js]\n"
+            "[Error Scenarios]\n"
+            "R2: B -> [COVERED by foo/throws.html]\n"
+            "R3: C must throw -> [UNCOVERED]\n</audit_worksheet>"
+        ),
+        wpt_context=WPTContext(
+            test_contents={
+                str(root / "api/idlharness.window.js"): "",
+                str(root / "api/foo/throws.html"): "",
+                str(root / "api/basic.html"): "",
+            }
+        ),
+    )
+    suggestion = (
+        "<test_suggestion><description>C must throw</description>"
+        "</test_suggestion>"
+    )
+
+    assert _audit_hints(suggestion, context, root) == (
+        ["api/foo/throws.html", "api/idlharness.window.js"],
+        "api",
+    )
+    assert _audit_hints(suggestion, WorkflowContext(), root) == ([], None)
+
+
+def test_format_test_suggestion_adds_audit_hints() -> None:
+    """Related tests and the target directory are passed to the generator."""
+    brief = _format_test_suggestion(
+        "<test_suggestion><description>D1</description></test_suggestion>",
+        "feat",
+        ["url"],
+        sanitize=True,
+        related_tests=["api/a.html"],
+        target_directory="api",
+    )
+
+    assert "<related_test>api/a.html</related_test>" in brief
+    assert "<target_directory>api</target_directory>" in brief

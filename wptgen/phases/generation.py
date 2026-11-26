@@ -14,6 +14,9 @@
 
 """Phase 4: Generation - Interactive test selection and agentic generation."""
 
+import posixpath
+import re
+from collections import Counter
 from pathlib import Path
 
 from jinja2 import Environment
@@ -28,12 +31,16 @@ from wptgen.models import (
     WorkflowPhase,
 )
 from wptgen.phases.context_assembly import resolve_web_features_manifest
+from wptgen.phases.report_render import parse_audit_worksheet
 from wptgen.ui import UIProvider
 from wptgen.utils import (
     extract_xml_tag,
     get_next_available_root,
     parse_suggestions,
 )
+
+# Existing tests passed to each generator agent as examples to start from.
+MAX_RELATED_TESTS = 3
 
 
 async def run_test_generation(
@@ -144,11 +151,90 @@ async def run_single_test_generation(
     )
 
 
+def _audit_hints(
+    suggestion_xml: str, context: WorkflowContext, wpt_root: Path
+) -> tuple[list[str], str | None]:
+    """Picks existing tests and a directory from the audit for a suggestion.
+
+    Args:
+      suggestion_xml: The suggestion XML from the audit response.
+      context: The workflow context, with the audit and the audited tests.
+      wpt_root: The WPT checkout the audited test paths are under.
+
+    Returns:
+      Up to MAX_RELATED_TESTS repository paths of tests the audit cited as
+      covering other requirements (those in the suggestion's category first,
+      most cited first), and the directory that holds most of the audited
+      tests, or None if no tests were audited.
+    """
+    tests = []
+    for path in (
+        context.wpt_context.test_contents if context.wpt_context else []
+    ):
+        try:
+            tests.append(Path(path).relative_to(wpt_root).as_posix())
+        except ValueError:
+            tests.append(path.lstrip("/"))
+    if not tests:
+        return [], None
+    directories = Counter(posixpath.dirname(test) for test in tests)
+    target_directory = directories.most_common(1)[0][0]
+
+    # The audit copies each requirement's description into its suggestion.
+    description = " ".join(
+        (extract_xml_tag(suggestion_xml, "description") or "").split()
+    )
+    categories: dict[str, str | None] = {}
+    category = None
+    for block in re.findall(
+        r"(?s)<requirement\b[^>]*>.*?</requirement>",
+        context.requirements_xml or "",
+    ):
+        req_id = re.search(r'\bid="([^"]+)"', block)
+        if not req_id:
+            continue
+        categories[req_id.group(1)] = extract_xml_tag(block, "category")
+        req_description = extract_xml_tag(block, "description") or ""
+        if description and " ".join(req_description.split()) == description:
+            category = categories[req_id.group(1)]
+
+    def resolve(cited: str) -> str | None:
+        cited = cited.strip().strip("`").lstrip("/")
+        if cited in tests:
+            return cited
+        matches = [test for test in tests if test.endswith(f"/{cited}")]
+        return matches[0] if len(matches) == 1 else None
+
+    same_category: Counter[str] = Counter()
+    other: Counter[str] = Counter()
+    worksheet = extract_xml_tag(context.audit_response or "", "audit_worksheet")
+    for row in parse_audit_worksheet(worksheet or ""):
+        if row.status != "COVERED":
+            continue
+        row_category = categories.get(row.id, row.category)
+        counts = (
+            same_category if category and row_category == category else other
+        )
+        for cited in row.tests:
+            test = resolve(cited)
+            if test:
+                counts[test] += 1
+
+    related: list[str] = []
+    for counts in (same_category, other):
+        for test, _ in counts.most_common():
+            if test not in related and len(related) < MAX_RELATED_TESTS:
+                related.append(test)
+    return related, target_directory
+
+
 def _format_test_suggestion(
     suggestion_xml: str,
     feature_id: str | None,
     spec_urls: list[str],
     sanitize: bool = False,
+    related_tests: list[str] | None = None,
+    target_directory: str | None = None,
 ) -> str:
     """Helper to inject required metadata into a test suggestion XML block.
 
@@ -157,10 +243,19 @@ def _format_test_suggestion(
       feature_id: The ID of the web feature.
       spec_urls: A list of specification URLs.
       sanitize: Whether to strip extra tags and return a brief version.
+      related_tests: Existing tests the generator can start from.
+      target_directory: The directory most of the feature's tests are in.
 
     Returns:
       A modified XML string with enriched metadata.
     """
+    hints = [
+        f"  <related_test>{test}</related_test>" for test in related_tests or []
+    ]
+    if target_directory:
+        hints.append(
+            f"  <target_directory>{target_directory}</target_directory>"
+        )
     if sanitize:
         description = (
             extract_xml_tag(suggestion_xml, "description")
@@ -176,6 +271,7 @@ def _format_test_suggestion(
             lines.append(f"  <spec_url>{url}</spec_url>")
         if feature_id:
             lines.append(f"  <feature_id>{feature_id}</feature_id>")
+        lines.extend(hints)
         lines.append("</test_suggestion>")
         return "\n".join(lines)
     else:
@@ -185,6 +281,7 @@ def _format_test_suggestion(
             lines.append(f"  <spec_url>{url}</spec_url>")
         if feature_id:
             lines.append(f"  <feature_id>{feature_id}</feature_id>")
+        lines.extend(hints)
         additions = "\n".join(lines)
         if additions:
             return suggestion_xml.replace(
@@ -241,11 +338,20 @@ async def _generate_adk_loop(
     tasks = []
 
     for suggestion_xml in approved_suggestions_xml:
+        related_tests, target_directory = (
+            _audit_hints(
+                suggestion_xml, context, Path(config.wpt_path).resolve()
+            )
+            if config.wpt_path
+            else ([], None)
+        )
         modified_xml = _format_test_suggestion(
             suggestion_xml,
             context.feature_id,
             spec_urls,
             sanitize=config.brief_suggestions,
+            related_tests=related_tests,
+            target_directory=target_directory,
         )
 
         raw_test_type = (
