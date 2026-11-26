@@ -756,7 +756,8 @@ def test_agent_tools_run_wpt_test_flag_injection(
     assert result["status"] == "success"
     mock_run.assert_called_once()
     args, kwargs = mock_run.call_args
-    # cmd looks like: ['./wpt', 'run', '--channel', 'canary', '--headless',
-    # '--log-raw', ..., 'chrome', './--dummy-flag.html']
+    # cmd looks like: ['./wpt', 'run', '--yes', '--channel', 'canary',
+    # '--headless', '--log-raw', ..., 'chrome', './--dummy-flag.html']
     assert args[0][-1] == "./--dummy-flag.html"
-    assert args[0][0:2] == ["./wpt", "run"]
+    assert args[0][0:3] == ["./wpt", "run", "--yes"]
+    assert kwargs["stdin"] == subprocess.DEVNULL

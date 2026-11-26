@@ -289,9 +289,12 @@ def run_test_file(
 
     start = time.monotonic()
     try:
+        # `--yes` lets `./wpt run` download a missing webdriver instead of
+        # prompting, since its output is captured and nobody sees the prompt.
         cmd = [
             "./wpt",
             "run",
+            "--yes",
             "--channel",
             channel,
         ]
@@ -310,6 +313,7 @@ def run_test_file(
             result = subprocess.run(
                 cmd,
                 cwd=str(wpt_path),
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=WPT_RUN_TIMEOUT_SECONDS,
