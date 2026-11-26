@@ -130,6 +130,8 @@ class TokenUsage:
     prompt_tokens: int = 0
     candidates_tokens: int = 0
     total_tokens: int = 0
+    # The part of prompt_tokens the provider served from its prompt cache.
+    cached_tokens: int = 0
 
 
 class ADKStreamManager:
@@ -162,6 +164,9 @@ class ADKStreamManager:
             )
             self.token_usage.total_tokens += (
                 getattr(usage, "total_token_count", None) or 0
+            )
+            self.token_usage.cached_tokens += (
+                getattr(usage, "cached_content_token_count", None) or 0
             )
 
         if not event.content or not event.content.parts:

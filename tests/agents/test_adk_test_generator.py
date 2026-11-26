@@ -25,6 +25,7 @@ from pytest_mock import MockerFixture
 pytest.importorskip("google.adk")
 
 from wptgen.agents.adk_test_generator import (
+    _directory_listing,
     _record_final_runs,
     generate_test_with_adk,
 )
@@ -171,6 +172,10 @@ async def test_generate_test_with_adk(
             "reason": "needs other to observe it",
         }
     }
+    prompt_kwargs = mock_jinja_env.get_template(
+        "adk_test_generator.jinja"
+    ).render.call_args.kwargs
+    assert prompt_kwargs["spec_contents"] == {"spec1": "fake spec"}
     [usage] = context.agent_usage
     assert usage["files"] == ["my-feature-1.html"]
     assert (usage["model_calls"], usage["test_runs"]) == (1, 0)
@@ -512,3 +517,16 @@ def test_record_final_runs(
     assert records["m.html"]["final"]["status"] == "not_run"
     assert "r.html" not in records
     harness_run.assert_called_once()
+
+
+def test_directory_listing(tmp_path: Path) -> None:
+    """Lists entries with directories marked, capped, and only inside WPT."""
+    (tmp_path / "api" / "resources").mkdir(parents=True)
+    for i in range(3):
+        (tmp_path / "api" / f"t{i}.html").touch()
+
+    assert _directory_listing(tmp_path, "api") == (
+        "resources/\nt0.html\nt1.html\nt2.html"
+    )
+    assert _directory_listing(tmp_path, "../outside") is None
+    assert _directory_listing(tmp_path, None) is None

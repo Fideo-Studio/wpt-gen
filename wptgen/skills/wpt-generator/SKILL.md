@@ -8,7 +8,7 @@ This skill enables an ADK agent to generate Web Platform Tests (WPT) from minima
 
 ## Workflow
 
-**Temporary Files Policy:** If you need to create any temporary files during research, prototyping, or debugging, use the `write_file` tool to place them exclusively inside a `.wpt-generator-tmp/` directory at the root of the repository. Do not scatter temporary files across the codebase.
+**Temporary Files Policy:** Write the test in its final location and fix it there. Create a prototype only to check a browser behavior you can't learn from the spec or existing tests, and run it at most once; that run counts toward the attempt limit in step 6. Place any temporary file exclusively inside a `.wpt-generator-tmp/` directory at the root of the repository, using the `write_file` tool. Do not scatter temporary files across the codebase.
 
 When asked to generate a WPT from an XML test suggestion, follow these steps:
 
@@ -22,6 +22,8 @@ Extract the following elements from the `<test_suggestion>` XML snippet provided
 - `<spec_url>` (can be multiple): A link to the specification. You MUST include these exact URLs in the generated test (using `<link rel="help" href="...">` for HTML tests, or as a single-line comment for `.js` tests).
 - `<related_test>` (optional, can be multiple): An existing test that the coverage audit found covers a related requirement, as a path from the repository root. A good place to start your research.
 - `<target_directory>` (optional): The directory that holds most of the existing tests the audit read for this feature.
+
+The request may also include the specification text the suggestion comes from (`<spec_document>`), the files in `<target_directory>` (`<directory_listing>`), and `wpt_style_guide.md` (`<wpt_style_guide>`). Use them as given instead of fetching the spec, listing the directory or loading that guide again.
 
 ### 2. Locate the Test Directory
 {% if has_feature_id %}
@@ -61,7 +63,7 @@ Before creating a new file, rigorously check if the test logic belongs in existi
 {% endif %}
 ### 5. Load References & Generate the Test
 **Before writing any code**, you MUST read the appropriate style guides to ensure correct formatting and syntax:
-- For general guidelines (apply to all): See [wpt_style_guide.md](references/wpt_style_guide.md)
+- For general guidelines (apply to all): See [wpt_style_guide.md](references/wpt_style_guide.md), unless it's already in the request
 - If Testharness: See [testharness_style_guide.md](references/testharness_style_guide.md)
 - If Reftest: See [reftest_style_guide.md](references/reftest_style_guide.md)
 - If Crashtest: See [crashtest_style_guide.md](references/crashtest_style_guide.md)
@@ -74,7 +76,7 @@ Before creating a new file, rigorously check if the test logic belongs in existi
 Write the appropriate WPT test to strictly satisfy the `<description>` using the `write_file` tool:
 - **CRITICAL RULE: Style Guides > Golden Examples:** Existing tests ("Golden Examples") sometimes contain legacy code and violate current best practices. You should prioritize the explicit rules in the style guides over the paradigms found in surrounding files. Use existing files to understand the *domain logic*, but rely exclusively on the style guides for the *implementation syntax*.
 - **Omit HTML Boilerplate:** Unless the test strictly requires attaching attributes to the root elements, you MUST omit standard `<html>`, `<head>`, and `<body>` tags in your generated `.html` files (including references) to keep tests focused and concise, even if "Golden Examples" include them. Start directly with `<!DOCTYPE html>` and `<meta charset="utf-8">`.
-- **Deduce Expectations:** Carefully deduce the exact pass/fail condition and assertions from the `<description>`. If the requirement is highly complex or vague, use the `fetch_spec_content` tool to fetch the `<spec_url>` text to gain deeper context before writing the test.
+- **Deduce Expectations:** Carefully deduce the exact pass/fail condition and assertions from the `<description>`. If the requirement is highly complex or vague, read the `<spec_document>` in the request, or, if there isn't one, use the `fetch_spec_content` tool to fetch the `<spec_url>` text, to gain deeper context before writing the test.
 - **CRITICAL RULE: Minimize Specification Boilerplate:** Only use the APIs strictly required to trigger the behavior described in the `<description>`. Do not include optional features or initialization boilerplate from the spec unless explicitly required by the core assertion.
 - **CRITICAL RULE: Domain Helpers > Golden Examples:** Check if a built-in helper exists in the local `resources/` directory to avoid repetitive boilerplate. Even if your "Golden Example" writes out boilerplate logic manually (e.g., manually polling, fetching, resolving a sequence of events, or establishing positive controls), you MUST aggressively replace that boilerplate if a higher-level abstraction exists in a local helper file. **When you identify a helper file, you MUST perform an exhaustive audit of its entire exported API (e.g., reading the whole `helper.js` file using `read_file`) to discover all available utilities (like `wait()`, `delay()`, or custom assertions). Do not restrict your usage only to the specific functions the Golden Example used.**
    - If testing CSS property parsing, descriptor parsing (e.g., `@font-face` descriptors), at-rules, inheritance, computed values, or shorthands: See [css_testcommon.md](references/domain_helpers/css_testcommon.md)
@@ -90,16 +92,16 @@ Before completing the task, you MUST validate that the code you generated is syn
 1. **Linting:** Use the `run_wpt_lint` tool on the file you created/modified.
    - If the linter reports errors (e.g., `TRAILING WHITESPACE`, `INDENT TABS`), you MUST use the `replace_in_file` tool to fix the errors and re-run the linter until it passes cleanly. This saves context tokens compared to rewriting the entire file.
 
-2. **Execution:** If the `run_wpt_test` tool is available, use it on the file you created/modified. If the user prompt explicitly instructs you to skip running tests, or if the tool is not in your toolset, you MUST SKIP this execution step.
+2. **Execution:** If the `run_wpt_test` tool is available, use it on the file you created/modified. Only run tests you created or modified, never existing tests for reference. Delete any temporary files first, so the last run is of the final files. If the user prompt explicitly instructs you to skip running tests, or if the tool is not in your toolset, you MUST SKIP this execution step.
    - **CRITICAL RULE - Manual Tests:** If the test you created or modified is a manual test (e.g., ends in `-manual.html` or requires human intervention), you **MUST SKIP** this execution step entirely. Rely strictly on the linter for manual tests.
    - **Analyze the Output:** Read the test runner's output carefully.
    - **Self-Correct:** If the runner reports a `Harness Error`, `SyntaxError`, a timeout, or a failure that indicates a flaw in your test logic (e.g., calling an undefined helper function or making an incorrect assertion), you MUST use the `replace_in_file` or `write_file` tools to fix the bug, and re-run the test. Use `replace_in_file` whenever possible.
-   - Repeat this execute-and-fix loop until the test executes successfully without syntax or harness errors. **Maximum 3 attempts.** If the test still fails after 3 correction attempts, stop debugging and proceed to finalize. *(Note: If the test fails because the browser genuinely does not support the feature, that is acceptable—your goal is to ensure the **test code** itself is valid. Say so in `known_failures` when you finalize: wpt-gen runs each test once more after you finish, records the result, and flags any test that doesn't pass for a person to review.)*
+   - Repeat this execute-and-fix loop until the test executes successfully without syntax or harness errors. **Maximum 3 attempts**, including any prototype run. Don't lint or run a file again unless you changed it since its last lint or run. If the test still fails after 3 correction attempts, stop debugging and proceed to finalize. *(Note: If the test fails because the browser genuinely does not support the feature, that is acceptable—your goal is to ensure the **test code** itself is valid. Say so in `known_failures` when you finalize: wpt-gen runs each test once more after you finish, records the result, and flags any test that doesn't pass for a person to review.)*
 
 ### 7. Finalizing
 - Ensure standard WPT scripts are included properly (if applicable) using absolute paths from the root server.
 - Ensure crashtests end with `-crash.html` if creating a new crashtest file.
 - **Do not edit `WEB_FEATURES.yml` files.** wpt-gen maps every test you report to the feature after you finish, and checks the mapping with WPT's own tooling.
-- **Clean Up:** You MUST explicitly delete any temporary files you created in `.wpt-generator-tmp/` using the `delete_file` tool to ensure no temporary prototypes, scripts, or intermediate files are left behind in the repository.
+- **Clean Up:** You MUST explicitly delete any temporary files you created in `.wpt-generator-tmp/` using the `delete_file` tool, before the final lint and run in step 6, to ensure no temporary prototypes, scripts, or intermediate files are left behind in the repository.
 - **Report every file:** Call `report_generation_complete` with every test file you created or modified, including references and helper files.{% if has_feature_id %} In `feature_mappings`, give each test file (not references or helpers) the web feature IDs it covers. This is normally just `<feature_id>`. List another feature only when the test can't avoid exercising it, and say why in `reason`; a person reviews these.{% endif %} If a subtest still fails and you believe the browser is at fault rather than the test, list it in `known_failures` with the file's `path`, the `subtest` name and your `reason`.
 - Once the test is validated, your task is complete.

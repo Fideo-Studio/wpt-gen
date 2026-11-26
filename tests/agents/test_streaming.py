@@ -41,6 +41,23 @@ def test_adk_stream_manager_text(capsys: pytest.CaptureFixture[str]) -> None:
     ui_mock.print.assert_not_called()
 
 
+def test_adk_stream_manager_adds_up_token_usage() -> None:
+    """Token counts, including cached prompt tokens, add up across events."""
+    usage = types.GenerateContentResponseUsageMetadata(
+        prompt_token_count=100,
+        candidates_token_count=10,
+        total_token_count=110,
+        cached_content_token_count=80,
+    )
+    with ADKStreamManager(MagicMock()) as manager:
+        for _ in range(2):
+            manager.process_event(Event(author="agent", usage_metadata=usage))
+
+    assert manager.token_usage.prompt_tokens == 200
+    assert manager.token_usage.cached_tokens == 160
+    assert manager.token_usage.total_tokens == 220
+
+
 def test_adk_stream_manager_thought() -> None:
     """Test streaming thought to ui."""
     ui_mock = MagicMock()

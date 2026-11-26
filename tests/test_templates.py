@@ -68,3 +68,30 @@ def test_requirements_extraction_system_templates_ask_for_spec_quote() -> None:
         )
         assert "**Verbatim Spec Quote:**" in rendered, name
         assert "<spec_quote>" in rendered, name
+
+
+def test_adk_test_generator_template_puts_shared_context_first() -> None:
+    """The style guide, spec and directory listing come before the
+    suggestion, which is the only part that differs between agents."""
+    env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)))
+    rendered = env.get_template("adk_test_generator.jinja").render(
+        suggestion_xml="<test_suggestion>S</test_suggestion>",
+        wpt_style_guide="GUIDE",
+        spec_contents={"https://spec": "SPEC"},
+        target_directory="api",
+        directory_listing="a.html",
+        output_dir="/wpt",
+    )
+
+    positions = [
+        rendered.index(text)
+        for text in ("GUIDE", "SPEC", '<directory_listing path="api">', "S</")
+    ]
+    assert positions == sorted(positions)
+    assert '<spec_document url="https://spec">' in rendered
+
+    bare = env.get_template("adk_test_generator.jinja").render(
+        suggestion_xml="<test_suggestion>S</test_suggestion>"
+    )
+    assert "<spec_document" not in bare
+    assert "<directory_listing" not in bare

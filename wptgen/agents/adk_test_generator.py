@@ -42,6 +42,11 @@ from wptgen.models import TestType, WorkflowContext
 from wptgen.ui import UIProvider
 from wptgen.utils import extract_xml_tag
 
+# Specs longer than this (sliced sections rarely are) are left for the agent
+# to fetch, rather than sent with every model call.
+MAX_PROMPT_SPEC_CHARS = 60_000
+MAX_LISTING_ENTRIES = 200
+
 
 async def generate_test_with_adk(
     suggestion_xml: str,
@@ -213,10 +218,28 @@ async def generate_test_with_adk(
     else:
         output_dir = wpt_root
 
+    # Context every agent would otherwise fetch, list or load itself, put
+    # before the suggestion so agents of one run share a prompt prefix.
+    spec_contents = context.spec_contents or {}
+    if (
+        sum(len(text) for text in spec_contents.values())
+        > MAX_PROMPT_SPEC_CHARS
+    ):
+        spec_contents = {}
+    target_directory = extract_xml_tag(suggestion_xml, "target_directory")
+    style_guide = skill_dir / "references" / "wpt_style_guide.md"
     prompt_template = jinja_env.get_template("adk_test_generator.jinja")
     prompt = prompt_template.render(
         output_dir=output_dir,
         suggestion_xml=suggestion_xml,
+        spec_contents=spec_contents,
+        target_directory=target_directory,
+        directory_listing=_directory_listing(wpt_root, target_directory),
+        wpt_style_guide=(
+            style_guide.read_text(encoding="utf-8")
+            if style_guide.is_file()
+            else None
+        ),
     )
     content = types.Content(role="user", parts=[types.Part(text=prompt)])
 
@@ -279,6 +302,7 @@ async def generate_test_with_adk(
                 "model_calls": model_calls,
                 "tool_calls": tool_calls,
                 "prompt_tokens": usage.prompt_tokens,
+                "cached_tokens": usage.cached_tokens,
                 "output_tokens": usage.candidates_tokens,
                 "total_tokens": usage.total_tokens,
                 "test_runs": len(run_log.runs),
@@ -365,6 +389,22 @@ def _record_final_runs(
             ],
             "known_failures": failures,
         }
+
+
+def _directory_listing(wpt_root: Path, directory: str | None) -> str | None:
+    """Lists a directory's entries, one per line, directories with a `/`."""
+    if not directory:
+        return None
+    try:
+        target = _validate_safe_path(Path(directory), wpt_root)
+        entries = sorted(target.iterdir())
+    except (OSError, ValueError):
+        return None
+    names = [e.name + ("/" if e.is_dir() else "") for e in entries]
+    if len(names) > MAX_LISTING_ENTRIES:
+        rest = len(names) - MAX_LISTING_ENTRIES
+        names = names[:MAX_LISTING_ENTRIES] + [f"... and {rest} more"]
+    return "\n".join(names)
 
 
 def _failing_subtests(run: dict[str, Any]) -> list[str]:

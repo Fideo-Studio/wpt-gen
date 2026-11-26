@@ -1,5 +1,24 @@
 Use the wpt-generator skill to generate the following test. Rigorously follow all instructions in the skill.
+{%- if wpt_style_guide %}
+
+<wpt_style_guide>
+{{ wpt_style_guide }}
+</wpt_style_guide>
+{%- endif %}
+{%- for url, content in (spec_contents or {}).items() %}
+
+<spec_document url="{{ url }}">
+{{ content }}
+</spec_document>
+{%- endfor %}
+{%- if directory_listing %}
+
+<directory_listing path="{{ target_directory }}">
+{{ directory_listing }}
+</directory_listing>
+{%- endif %}
 {%- if output_dir %}
+
 The output directory for these files MUST be: {{ output_dir }}
 {%- endif %}
 
