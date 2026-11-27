@@ -252,6 +252,15 @@ def _payload_to_input_scope(payload: dict[str, Any]) -> InputScope:
     )
 
 
+def read_requirements_file(path: Path) -> str:
+    """Reads requirements XML, or the `requirements_xml` of a generate
+    run's `requirements.json`."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".json":
+        return str(json.loads(text)["requirements_xml"])
+    return text
+
+
 async def _extract_requirements_for_spec(
     spec_url: str,
     config: Config,
@@ -361,6 +370,7 @@ async def run_evaluation(
     ui: UIProvider,
     spec_urls: list[str] | None = None,
     strategy: EvaluatorStrategy = DEFAULT_EVALUATOR_STRATEGY,
+    requirements_xml: str | None = None,
 ) -> Path | None:
     """Evaluates a single WPT test file.
 
@@ -382,6 +392,10 @@ async def run_evaluation(
             pass — `"distilled"` (default; judges against the distilled
             rules corpus) or `"raw"` (reads the curated upstream docs
             live).
+        requirements_xml: Optional requirements to judge conformance
+            against, such as those a generate run extracted for the
+            feature. When given, they replace extracting requirements from
+            each spec, and one conformance section covers all the specs.
 
     Returns:
         The path to the written findings report, or None if the
@@ -419,9 +433,16 @@ async def run_evaluation(
     _report_pass_summaries(ui, "Documentation", input_scope, doc_inputs_tokens)
 
     conformance: ConformanceSection | None = None
-    specs = await _gather_spec_requirements(
-        spec_urls or [], config, jinja_env, ui
-    )
+    if requirements_xml and spec_urls:
+        specs = [
+            SpecRequirements(
+                spec_url=", ".join(spec_urls), requirements_xml=requirements_xml
+            )
+        ]
+    else:
+        specs = await _gather_spec_requirements(
+            spec_urls or [], config, jinja_env, ui
+        )
     if specs:
         conformance = await _run_conformance(
             specs=specs,

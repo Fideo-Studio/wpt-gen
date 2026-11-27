@@ -286,6 +286,146 @@ def check_worker_boilerplate(path: str, content: bytes) -> Error | None:
     return None
 
 
+_SCRIPT_BLOCK_RE = re.compile(
+    rb"<script\b(?![^>]*\bsrc=)[^>]*>(.*?)</script>", re.DOTALL | re.IGNORECASE
+)
+# A `test()` or `promise_test()` call given a function. `async_test()` only
+# declares a test; its assertions come in later steps.
+_SUBTEST_CALL_RE = re.compile(
+    rb"(?<![\w.$])(?<!function )(?:promise_test|test)\s*\("
+    rb"\s*(?:async\b|\(|[\w$]+\s*=>|function\b)"
+)
+_ASSERTION_RE = re.compile(
+    rb"\b(?:assert_\w+|promise_rejects_\w+|unreached_func)\s*\("
+)
+# A call to a bare function, which may be a helper that asserts.
+_BARE_CALL_RE = re.compile(rb"(?<![\w.$])(?<!new )([A-Za-z_$][\w$]*)\s*\(")
+_NOT_HELPERS = {
+    b"if",
+    b"for",
+    b"while",
+    b"switch",
+    b"catch",
+    b"function",
+    b"return",
+    b"typeof",
+    b"await",
+    b"async",
+}
+_RETURN_RE = re.compile(rb"\breturn\b")
+_STRING_RE = re.compile(rb"""(['"`])((?:\\.|(?!\1).)*)\1""", re.DOTALL)
+# Names of smoke tests, which pass unless something throws or crashes.
+_NO_THROW_NAME_RE = re.compile(
+    rb"(?:not|n't) throw|crash|construct|\bset ?up\b|clean ?up|\bis OK\b",
+    re.IGNORECASE,
+)
+
+
+def _without_comments(content: bytes) -> bytes:
+    """`content` with comments blanked out, keeping strings and newlines."""
+    out = bytearray(content)
+    i = 0
+    while i < len(content):
+        char = content[i : i + 1]
+        if char in (b"'", b'"', b"`"):
+            i += 1
+            while i < len(content) and content[i : i + 1] != char:
+                i += 2 if content[i : i + 1] == b"\\" else 1
+        elif content.startswith(b"//", i) or content.startswith(b"/*", i):
+            end_marker = b"\n" if content[i + 1 : i + 2] == b"/" else b"*/"
+            end = content.find(end_marker, i + 2)
+            end = len(content) if end == -1 else end
+            for j in range(i, end):
+                if out[j] != ord("\n"):
+                    out[j] = ord(" ")
+            i = end
+        i += 1
+    return bytes(out)
+
+
+def _call_end(content: bytes, open_paren: int) -> int | None:
+    """The index of the parenthesis closing the one at `open_paren`,
+    skipping strings and comments, or None if it isn't closed."""
+    depth, i = 0, open_paren
+    while i < len(content):
+        char = content[i : i + 1]
+        if char in (b"'", b'"', b"`"):
+            i += 1
+            while i < len(content) and content[i : i + 1] != char:
+                i += 2 if content[i : i + 1] == b"\\" else 1
+        elif content.startswith(b"//", i):
+            i = content.find(b"\n", i)
+            if i == -1:
+                return None
+        elif content.startswith(b"/*", i):
+            i = content.find(b"*/", i)
+            if i == -1:
+                return None
+            i += 1
+        elif char == b"(":
+            depth += 1
+        elif char == b")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
+def check_subtest_assertions(path: str, content: bytes) -> list[Error]:
+    """CHECKLIST-004 (partial): a testharness subtest with no assertions.
+
+    Such a subtest passes unless it throws, rejects or times out, so it
+    rarely tests what its name claims. Exempt: subtests named as smoke
+    tests ("does not throw", "does not crash", "can be constructed"), those
+    that return a value (a promise test's result can depend on it), those
+    that call a bare function (which may be a helper that asserts), and
+    crash tests. The rest of CHECKLIST-004 stays semantic.
+    """
+    if "/crashtests/" in path or "-crash." in os.path.basename(path):
+        return []
+    if path.endswith(tuple(EXTENSIONS["js"])):
+        sources = [(0, content)]
+    elif b"testharness.js" in content:
+        sources = [
+            (m.start(1), m.group(1)) for m in _SCRIPT_BLOCK_RE.finditer(content)
+        ]
+    else:
+        return []
+    errors: list[Error] = []
+    for offset, source in sources:
+        source = _without_comments(source)
+        for match in _SUBTEST_CALL_RE.finditer(source):
+            end = _call_end(source, source.index(b"(", match.start()))
+            if end is None:
+                continue
+            call = source[match.start() : end + 1]
+            # The name is the call's last string argument.
+            strings = _STRING_RE.findall(call)
+            name = strings[-1][1] if strings else b""
+            if (
+                _ASSERTION_RE.search(call)
+                or _NO_THROW_NAME_RE.search(name)
+                or _RETURN_RE.search(call)
+            ):
+                continue
+            body = _STRING_RE.sub(b'""', call[call.index(b"(") + 1 :])
+            helpers = {m.group(1) for m in _BARE_CALL_RE.finditer(body)}
+            if helpers - _NOT_HELPERS:
+                continue
+            line_no = content.count(b"\n", 0, offset + match.start()) + 1
+            errors.append(
+                (
+                    "CHECKLIST-004",
+                    "Subtest has no assertions, so it passes unless it throws, "
+                    "rejects or times out; assert what it claims to test",
+                    path,
+                    line_no,
+                )
+            )
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -308,9 +448,16 @@ _PATH_CHECKS: list[Callable[[str], Error | None]] = [
 # Content checks need full file bytes. Each is paired with a filename
 # predicate so content is only read when at least one applies.
 _CONTENT_CHECKS: list[
-    tuple[Callable[[str], bool], Callable[[str, bytes], Error | None]]
+    tuple[
+        Callable[[str], bool],
+        Callable[[str, bytes], Error | list[Error] | None],
+    ]
 ] = [
     (is_worker_js, check_worker_boilerplate),
+    (
+        lambda path: os.path.splitext(path)[1] in EXTENSIONS["js_all"],
+        check_subtest_assertions,
+    ),
 ]
 
 
@@ -343,9 +490,11 @@ def check_file(path: str, content: bytes | None = None) -> list[Error]:
             content = handle.read()
 
     for content_check in content_checks:
-        err = content_check(path, content)
-        if err is not None:
-            errors.append(err)
+        result = content_check(path, content)
+        if isinstance(result, tuple):
+            errors.append(result)
+        elif result:
+            errors.extend(result)
 
     for line_no, line in enumerate(content.splitlines(), start=1):
         for chk in line_checks:

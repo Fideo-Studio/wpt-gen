@@ -37,6 +37,7 @@ from wptgen.phases.evaluation import (
     _count_findings,
     _payload_to_findings,
     _payload_to_input_scope,
+    read_requirements_file,
     run_evaluation,
 )
 from wptgen.utils import locate_snippet
@@ -918,6 +919,54 @@ async def test_run_evaluation_multiple_specs_judged_in_one_pass(
         3, f"Spec Conformance Evaluation ({spec_a}, {spec_b})"
     )
     mock_ui.report_findings_summary.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_evaluation_with_given_requirements_skips_extraction(
+    wpt_root_with_test: tuple[Path, Path],
+    evaluation_config: Config,
+    mock_ui: MagicMock,
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    """Given requirements (a generate run's) replace extraction, in one
+    conformance section for all the specs."""
+    _, test_path = wpt_root_with_test
+    payload = {
+        "findings": [],
+        "input_scope": {"files": [], "dependencies_not_read": []},
+    }
+    mocker.patch(
+        "wptgen.phases.evaluation.evaluate_test_with_adk",
+        new=AsyncMock(return_value=(payload, TokenUsage())),
+    )
+    mock_conformance = mocker.patch(
+        "wptgen.phases.evaluation.evaluate_conformance_with_adk",
+        new=AsyncMock(return_value=(payload, TokenUsage())),
+    )
+    mock_extract = mocker.patch(
+        "wptgen.phases.evaluation._extract_requirements_for_spec",
+        new=AsyncMock(),
+    )
+    requirements_json = tmp_path / "requirements.json"
+    requirements_json.write_text(
+        json.dumps({"requirements_xml": "<requirements_list/>"})
+    )
+
+    await run_evaluation(
+        test_path=test_path,
+        output_dir=tmp_path / "out",
+        config=evaluation_config,
+        jinja_env=MagicMock(),
+        ui=mock_ui,
+        spec_urls=["https://a/", "https://b/"],
+        requirements_xml=read_requirements_file(requirements_json),
+    )
+
+    mock_extract.assert_not_awaited()
+    [spec] = mock_conformance.await_args_list[0].kwargs["specs"]
+    assert spec.spec_url == "https://a/, https://b/"
+    assert spec.requirements_xml == "<requirements_list/>"
 
 
 @pytest.mark.asyncio

@@ -61,7 +61,7 @@ from wptgen.agents.adk_evaluator import (
     DEFAULT_EVALUATOR_STRATEGY,
     EvaluatorStrategy,
 )
-from wptgen.phases.evaluation import run_evaluation
+from wptgen.phases.evaluation import read_requirements_file, run_evaluation
 from wptgen.phases.generation import (
     run_single_test_generation,
 )
@@ -922,6 +922,33 @@ def evaluate(
             ),
         ),
     ] = False,
+    requirements: Annotated[
+        Path | None,
+        typer.Option(
+            "--requirements",
+            help=(
+                "Requirements to judge conformance against, instead of "
+                "extracting them from the spec: a requirements XML file, or "
+                "a generate run's requirements.json."
+            ),
+            exists=True,
+            dir_okay=False,
+        ),
+    ] = None,
+    yes_tokens: Annotated[
+        bool,
+        typer.Option(
+            "--yes-tokens",
+            help="Automatically confirm prompts about LLM token counts.",
+        ),
+    ] = False,
+    yes_cache: Annotated[
+        bool,
+        typer.Option(
+            "--yes-cache",
+            help="Automatically use cached requirements if they exist.",
+        ),
+    ] = False,
     strategy: Annotated[
         EvaluatorStrategy,
         typer.Option(
@@ -978,9 +1005,14 @@ def evaluate(
             provider_override=provider,
             model_override=model,
             wpt_dir_override=str(wpt_dir) if wpt_dir else None,
+            yes_tokens_override=yes_tokens,
+            yes_cache_override=yes_cache,
             require_api_key=True,
         )
         config.evaluator_skip_lints = skip_lints
+        requirements_xml = (
+            read_requirements_file(requirements) if requirements else None
+        )
 
         _print_run_config(ui, config)
 
@@ -995,6 +1027,7 @@ def evaluate(
                 ui=engine.ui,
                 spec_urls=spec_urls_list,
                 strategy=strategy,
+                requirements_xml=requirements_xml,
             )
         )
 

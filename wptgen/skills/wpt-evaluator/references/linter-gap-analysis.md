@@ -55,6 +55,7 @@ identifier space.
 | CSS-METADATA-003   | warn | `<meta name=flags>` uses a deprecated CSS token (line) |
 | MANUAL-004    | error | manual testharness `setup()` lacks `{explicit_timeout: true}` (line, gated on `-manual`) |
 | CHECKLIST-008    | warn | commented-out code (line, conservative regex) |
+| CHECKLIST-004 (partial) | warn | a testharness subtest with no assertions, so it can only fail by throwing, rejecting or timing out (content; skips smoke-test names, subtests that return a value or call a bare function, and crash tests). The rest of CHECKLIST-004 stays semantic. Flags about 1% of existing test files; a reviewer dismisses the legitimate "it resolves" cases |
 
 ## Not implemented — left to the LLM judge
 

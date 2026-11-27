@@ -169,3 +169,58 @@ def test_check_file_reports_line_numbers_for_line_checks() -> None:
     rev = [e for e in errors if e[0] == "CHECKLIST-008"]
     assert len(rev) == 1
     assert rev[0][3] == 2
+
+
+def test_checklist_004_flags_subtest_without_assertions() -> None:
+    content = (
+        b"promise_test(async t => {\n"
+        b"  const track = canvas.captureStream(0).getVideoTracks()[0];\n"
+        b"  track.requestFrame();\n"
+        b"}, 'requestFrame() captures a frame');\n"
+    )
+    assert check_file("t.window.js", content) == [
+        (
+            "CHECKLIST-004",
+            "Subtest has no assertions, so it passes unless it throws, "
+            "rejects or times out; assert what it claims to test",
+            "t.window.js",
+            1,
+        )
+    ]
+
+
+def test_checklist_004_quiet_on_subtests_that_can_fail() -> None:
+    """Assertions, a helper that may assert, a returned promise, and a
+    smoke-test name all exempt a subtest."""
+    content = (
+        b"test(() => { assert_true(x); }, 'asserts');\n"
+        b"test(() => { check_value(x); }, 'calls a helper');\n"
+        b"promise_test(() => { return p.then(f); }, 'returns');\n"
+        b"test(() => { new Foo(); }, 'Foo can be constructed');\n"
+        b"test(() => { t.add_cleanup(f); }, 'does not crash');\n"
+        b"// test(() => { x(); }, 'commented out');\n"
+        b"const t = async_test('declared, asserted later');\n"
+        b"function test() { y.z(); }\n"
+    )
+    assert "CHECKLIST-004" not in _rule_ids("t.any.js", content)
+
+
+def test_checklist_004_reads_only_scripts_in_html() -> None:
+    """In HTML, only inline scripts of testharness tests are checked, and
+    the line number is the subtest's line in the file."""
+    content = (
+        b'<!DOCTYPE html>\n<script src="/resources/testharness.js"></script>\n'
+        b"<p>test (prose)</p>\n"
+        b"<script>\ntest(() => { a.b(); }, 'no assertion');\n</script>\n"
+    )
+    errors = [
+        e for e in check_file("t.html", content) if e[0] == "CHECKLIST-004"
+    ]
+    assert [e[3] for e in errors] == [5]
+    assert _rule_ids("t.html", content.replace(b"testharness", b"other")) == []
+
+
+def test_checklist_004_quiet_in_crashtests() -> None:
+    content = b"test(() => { a.b(); }, 'no assertion');\n"
+    assert "CHECKLIST-004" not in _rule_ids("css/crashtests/t.html", content)
+    assert "CHECKLIST-004" not in _rule_ids("t-crash.html", content)
