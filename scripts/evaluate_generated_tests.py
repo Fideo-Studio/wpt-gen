@@ -57,9 +57,14 @@ def main() -> int:
         return 1
 
     failed = []
+    seen = set()
     entries = json.loads(tests_json.read_text(encoding="utf-8"))
     for entry in entries:
         path = Path(entry["path"])
+        # A file two suggestions both wrote is listed once per suggestion.
+        if path in seen:
+            continue
+        seen.add(path)
         run = entry.get("run")
         # Run records exist for tests only; older runs don't have them.
         if run is None and (not is_wpt_test_file(path) or "-ref" in path.name):

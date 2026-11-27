@@ -26,6 +26,7 @@ The `wpt-gen generate` command orchestrates a complex, multi-phase agentic workf
         *   **System Prompt:** `requirements_extraction_system.jinja`
         *   **User Prompt:** `requirements_extraction.jinja`
     *   A request that still fails after the LLM client's retries fails the phase; a failed category is never treated as one with no requirements.
+    *   Categories are extracted in separate calls, so the same rule can come back under two of them. A requirement whose spec quote repeats an earlier one is dropped, with a message naming the one it repeats.
 
 ## Phase 3: Coverage Audit (`coverage_audit.py`)
 

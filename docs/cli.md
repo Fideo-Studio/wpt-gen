@@ -82,6 +82,8 @@ After generation, `wpt-gen` maps each new test to the features the generator dec
 | `--run-on-browser` | Browser to use for the local WPT test runner (`chrome`, `firefox`, `safari`). |
 | `--run-on-channel` | Release channel to use for the local WPT test runner (`canary`, `nightly`, `stable`, `dev`). |
 
+Generated tests run through WPT's `./wpt run`, which can download a browser into the checkout's virtualenv. With the defaults, run `./wpt install --channel canary chrome browser` once in the WPT checkout. Run `./wpt` with the same `python3` that wpt-gen uses (for example, with wpt-gen's virtualenv active): WPT rebuilds its virtualenv, and removes any browser downloaded into it, when the Python changes. Safari also needs `safaridriver --enable` and WPT's `/etc/hosts` entries (`./wpt make-hosts-file`).
+
 ---
 
 ## `wpt-gen clear-cache`
