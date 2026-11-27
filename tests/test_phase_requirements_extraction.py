@@ -359,7 +359,9 @@ async def test_run_requirements_extraction_categorized_drops_repeats(
     mocker: MockerFixture,
 ) -> None:
     """A requirement whose spec quote another category already gave is
-    dropped, and the rest are numbered without a gap."""
+    dropped, and the rest are numbered without a gap. Short quotes, such as
+    a table row several attributes share, never mark a repeat."""
+    stop = "A captured stream MUST cease to capture content"
     context = WorkflowContext(
         feature_id="feat",
         metadata=FeatureMetadata("Feat", "Desc", ["http://spec"]),
@@ -379,10 +381,10 @@ async def test_run_requirements_extraction_categorized_drops_repeats(
     mocker.patch(
         "wptgen.phases.requirements_extraction.generate_safe",
         side_effect=[
-            requirement("Existence", "D1", "It MUST exist."),
-            requirement("Common Use Cases", "D2", "It MUST  stop."),
-            requirement("Error Scenarios", "D3", "It MUST throw."),
-            requirement("Invalidation", "D4", "It MUST\nstop."),
+            requirement("Existence", "D1", "| `defaultValue` | 0 |"),
+            requirement("Common Use Cases", "D2", f"{stop} immediately."),
+            requirement("Error Scenarios", "D3", "| `defaultValue` | 0 |"),
+            requirement("Invalidation", "D4", f"{stop}\n immediately."),
             requirement("Integration", "D5", ""),
         ],
     )
@@ -392,6 +394,7 @@ async def test_run_requirements_extraction_categorized_drops_repeats(
 
     assert res is not None
     assert "D4" not in res
+    assert "D3" in res  # same table row as D1, but not a repeat
     assert res.count("<requirement id=") == 4
     assert '<requirement id="R4"><category>Integration' in res
     mock_ui.info.assert_any_call(

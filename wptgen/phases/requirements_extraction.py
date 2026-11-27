@@ -38,6 +38,9 @@ from wptgen.phases.utils import (
 from wptgen.ui import UIProvider
 from wptgen.utils import extract_xml_tag
 
+# Spec quotes shorter than this aren't used to spot repeated requirements.
+MIN_MERGE_QUOTE_CHARS = 40
+
 # Kept for backwards compatibility with any external callers; new code
 # should use `load_cached_requirements` from the shared module directly.
 _load_cached_requirements = load_cached_requirements
@@ -293,7 +296,9 @@ async def run_requirements_extraction_categorized(
         all_requirements: list[str] = []
         requirement_counter = 1
         # Categories are extracted separately, so the same rule can come back
-        # under two of them. A repeated spec quote marks a repeat.
+        # under two of them. A repeated spec quote marks a repeat, unless the
+        # quote is too short to tell rules apart, such as a table row
+        # ("| defaultValue | 0 |") that several attributes share.
         ids_by_quote: dict[str, str] = {}
 
         for (name, _), response in zip(
@@ -323,6 +328,8 @@ async def run_requirements_extraction_categorized(
                 quote = " ".join(
                     (extract_xml_tag(req, "spec_quote") or "").split()
                 )
+                if len(quote) < MIN_MERGE_QUOTE_CHARS or "|" in quote:
+                    quote = ""
                 if quote in ids_by_quote:
                     ui.info(
                         f"Dropped a requirement from {name} that repeats "
